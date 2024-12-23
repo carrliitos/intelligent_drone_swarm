@@ -1,6 +1,8 @@
 # ESP32 Drone Swarm Coordination System
 > Benzon Carlitos Salazar (salazarbc24@uww.edu)
 
+**Branch to test [drone-python-plugin-template](https://github.com/gtaylor/drone-python-plugin-template)**
+
 ## Project Overview
 
 This project aims to develop a coordinated drone swarm system using ESP32 microcontrollers, implementing a hierarchical 
