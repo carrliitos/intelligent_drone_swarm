@@ -15,11 +15,12 @@ logger = logger.setup_logger(logger_name, f"{directory}/logs/{logger_file_name}.
 def main():
   cflib.crtp.init_drivers(enable_debug_driver=False)
   drone_udp = "udp://192.168.43.42:2390"
+
   le = ESPDrone(drone_udp)
   try:
     le.test_connection()
   except Exception as e:
-    logger.error("Error: {e}")
+    logger.error(f"Error: {e}")
 
 if __name__ == '__main__':
   main()
