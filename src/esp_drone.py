@@ -17,6 +17,7 @@ logger = logger.setup_logger(logger_name, f"{directory}/logs/{logger_file_name}.
 class ESPDrone():
   def __init__(self, link_uri):
     self._cf = Crazyflie(rw_cache='./cache')
+    self.link_uri = link_uri
 
     self._cf.connected.add_callback(self._connected)
     self._cf.disconnected.add_callback(self._disconnected)
@@ -89,7 +90,7 @@ class ESPDrone():
   def test_connection(self):
     logger.info("Testing connection...")
     try:
-      self._ramp_motors()
+      self._connected(self.link_uri)
       logger.info("Connection test completed successfully.")
     except Exception as e:
       logger.error(f"Error during connection test: {e}")
