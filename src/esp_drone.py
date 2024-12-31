@@ -1,5 +1,6 @@
 import time
 import os
+import sys
 from threading import Thread
 from pathlib import Path
 
@@ -8,6 +9,7 @@ from utils import context
 
 import cflib
 from cflib.crazyflie import Crazyflie
+from cflib.crazyflie.log import LogConfig
 
 directory = context.get_context(os.path.abspath(__file__))
 logger_file_name = Path(directory).stem
@@ -58,34 +60,76 @@ class ESPDrone():
 
   def _ramp_motors(self):
     """
-    Ramp motors to test connections with the ESP-drone.
+    Ramp motors to test connections with the ESP-drone while logging real-time variables.
     """
     logger.info("Starting motor ramp test...")
 
-    thrust_mult = 1
-    thrust_step = 500
-    thrust = 20000
+    thrust_levels = [5000, 10000, 15000, 20000, 15000, 10000, 5000]  # Define thrust levels
+    duration_per_level = 1  # Duration for each thrust level in seconds
     pitch = 0
     roll = 0
     yawrate = 0
 
-    # Unlock startup thrust protection
+    # Unlock startup thrust protection and send idle commands
+    logger.info("Sending initial idle setpoints to stabilize logging...")
     self._cf.commander.send_setpoint(0, 0, 0, 0)
+    time.sleep(0.1)  # Allow the system to stabilize
 
-    while thrust >= 20000:
-      logger.debug(f"Sending setpoint: roll={roll}, pitch={pitch}, yawrate={yawrate}, thrust={thrust}")
-      self._cf.commander.send_setpoint(roll, pitch, yawrate, thrust)
-      time.sleep(0.1)
-      if thrust >= 25000:
-        thrust_mult = -1
-      thrust += thrust_step * thrust_mult
+    # Set up logging for desired variables
+    log_config = self._setup_logging(['pm.vbatMV', 'pwm.m1_pwm', 'pwm.m2_pwm', 'pwm.m3_pwm', 'pwm.m4_pwm'])
 
-    logger.info("Motor ramp test completed. Stopping motors.")
-    self._cf.commander.send_setpoint(0, 0, 0, 0)
+    for thrust in thrust_levels:
+      start_time = time.time()
+      logger.info(f"Ramping motors at thrust={thrust}")
+      while time.time() - start_time < duration_per_level:
+        logger.debug(f"Sending setpoint: roll={roll}, pitch={pitch}, yawrate={yawrate}, thrust={thrust}")
+        self._cf.commander.send_setpoint(roll, pitch, yawrate, thrust)
+        time.sleep(0.1)
+
+    # Stop logging after motor ramp test
+    if log_config:
+      log_config.stop()
+      logger.info("Stopped logging.")
+
+    logger.info("Motor ramp test completed. Killing motors.")
+    self._cf.commander.send_setpoint(0, 0, 0, 0)  # Kill motors
     # Make sure that the last packet leaves before the link is closed
-    # since the message queue is not flushed before closing
     time.sleep(0.1)
-    self._cf.close_link()
+
+  def _setup_logging(self, variables):
+    """
+    Set up logging for the specified variables.
+    """
+    from cflib.crazyflie.log import LogConfig
+
+    log_config = LogConfig(name='ramp_test', period_in_ms=50)
+    for variable in variables:
+      try:
+        log_config.add_variable(variable, 'float')
+      except KeyError:
+        logger.warning(f"Variable {variable} not found in TOC.")
+
+    try:
+      self._cf.log.add_config(log_config)
+      log_config.data_received_cb.add_callback(self._log_callback)
+      log_config.error_cb.add_callback(self._log_error_callback)
+      log_config.start()
+      logger.info("Started logging variables.")
+      return log_config
+    except Exception as e:
+      logger.error(f"Error setting up logging: {e}")
+
+  def _log_callback(self, timestamp, data, logconf):
+    """
+    Callback for receiving log data.
+    """
+    logger.info(f"Timestamp: {timestamp}, Data: {data}")
+
+  def _log_error_callback(self, logconf, msg):
+    """
+    Callback for logging errors.
+    """
+    logger.error(f"LogConfig {logconf} error: {msg}")
 
   def test_connection(self):
     logger.info("Testing connection...")
