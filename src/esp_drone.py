@@ -29,6 +29,7 @@ class ESPDrone():
     self._cf.open_link(link_uri)
 
     logger.info(f"Connecting to {link_uri}")
+    logger.info(f"Crazyflie Status: {self._cf.state} ({{'0': 'DISCONNECTED', '1': INITIALIZED, '2': CONNECTED, '3': SETUP_FINISHED}})")
 
   def _connected(self, link_uri):
     """
@@ -100,7 +101,6 @@ class ESPDrone():
     """
     Set up logging for the specified variables.
     """
-    from cflib.crazyflie.log import LogConfig
 
     log_config = LogConfig(name='ramp_test', period_in_ms=50)
     for variable in variables:
@@ -118,6 +118,7 @@ class ESPDrone():
       return log_config
     except Exception as e:
       logger.error(f"Error setting up logging: {e}")
+      sys.exit(1)
 
   def _log_callback(self, timestamp, data, logconf):
     """
@@ -135,6 +136,9 @@ class ESPDrone():
     logger.info("Testing connection...")
     try:
       self._connected(self.link_uri)
+      self._cf.close_link()
+      logger.info(f"Crazyflie Status: {self._cf.state} ({{'0': 'DISCONNECTED', '1': INITIALIZED, '2': CONNECTED, '3': SETUP_FINISHED}})")
       logger.info("Connection test completed successfully.")
     except Exception as e:
       logger.error(f"Error during connection test: {e}")
+      sys.exit(1)
