@@ -3,6 +3,7 @@ import os
 import sys
 from threading import Thread
 from pathlib import Path
+import csv
 
 from utils import logger
 from utils import context
@@ -21,6 +22,22 @@ class ESPDrone():
     self._cf = Crazyflie(rw_cache='./cache')
     self.link_uri = link_uri
 
+    self.id_counter = 0  # Unique identifier for data rows
+    # File handles and CSV writers
+    self.files = {
+      "data1": open(f"{directory}/data/drone_data1.csv", mode="w", newline=""),
+      "data2": open(f"{directory}/data/drone_data2.csv", mode="w", newline=""),
+      "data3": open(f"{directory}/data/drone_data3.csv", mode="w", newline="")
+    }
+    self.writers = {
+      "data1": csv.DictWriter(self.files["data1"], fieldnames=["id", "timestamp", "pm.batteryLevel", "motor.m1", "motor.m2", "motor.m3", "motor.m4"]),
+      "data2": csv.DictWriter(self.files["data2"], fieldnames=["id", "timestamp", "stabilizer.roll", "stabilizer.pitch", "stabilizer.yaw", "stabilizer.thrust"]),
+      "data3": csv.DictWriter(self.files["data3"], fieldnames=["id", "timestamp", "gyro.x", "gyro.y", "gyro.z"])
+    }
+
+    for writer in self.writers.values():
+      writer.writeheader()
+
     self._cf.connected.add_callback(self._connected)
     self._cf.disconnected.add_callback(self._disconnected)
     self._cf.connection_failed.add_callback(self._connection_failed)
@@ -29,7 +46,7 @@ class ESPDrone():
     self._cf.open_link(link_uri)
 
     logger.info(f"Connecting to {link_uri}")
-    logger.info(f"Crazyflie Status: {self._cf.state} ({{'0': 'DISCONNECTED', '1': INITIALIZED, '2': CONNECTED, '3': SETUP_FINISHED}})")
+    logger.info(f"1. Crazyflie Status: {self._cf.state} ({{'0': 'DISCONNECTED', '1': INITIALIZED, '2': CONNECTED, '3': SETUP_FINISHED}})")
 
   def _connected(self, link_uri):
     """
@@ -58,6 +75,7 @@ class ESPDrone():
   def _disconnected(self, link_uri):
     """Callback when the Crazyflie is disconnected (called in all cases)"""
     logger.info(f"Disconnected from {link_uri}")
+    # sys.exit(1)
 
   def _ramp_motors(self):
     """
@@ -65,8 +83,9 @@ class ESPDrone():
     """
     logger.info("Starting motor ramp test...")
 
-    thrust_levels = [5000, 10000, 15000, 20000, 15000, 10000, 5000]  # Define thrust levels
-    duration_per_level = 1  # Duration for each thrust level in seconds
+    thrust_mult = 1
+    thrust_step = 50
+    thrust = 20000
     pitch = 0
     roll = 0
     yawrate = 0
@@ -74,35 +93,32 @@ class ESPDrone():
     # Unlock startup thrust protection and send idle commands
     logger.info("Sending initial idle setpoints to stabilize logging...")
     self._cf.commander.send_setpoint(0, 0, 0, 0)
-    time.sleep(0.1)  # Allow the system to stabilize
 
-    # Set up logging for desired variables
-    log_config = self._setup_logging(['pm.vbatMV', 'pwm.m1_pwm', 'pwm.m2_pwm', 'pwm.m3_pwm', 'pwm.m4_pwm'])
+    log_configs = [
+      (["pm.batteryLevel", "motor.m1", "motor.m2", "motor.m3", "motor.m4"], "data1"),
+      (["stabilizer.roll", "stabilizer.pitch", "stabilizer.yaw", "stabilizer.thrust"], "data2"),
+      (["gyro.x", "gyro.y", "gyro.z"], "data3")
+    ]
+    self.active_configs = [self._setup_logging(vars, writer) for vars, writer in log_configs]
 
-    for thrust in thrust_levels:
-      start_time = time.time()
-      logger.info(f"Ramping motors at thrust={thrust}")
-      while time.time() - start_time < duration_per_level:
-        logger.debug(f"Sending setpoint: roll={roll}, pitch={pitch}, yawrate={yawrate}, thrust={thrust}")
-        self._cf.commander.send_setpoint(roll, pitch, yawrate, thrust)
-        time.sleep(0.1)
-
-    # Stop logging after motor ramp test
-    if log_config:
-      log_config.stop()
-      logger.info("Stopped logging.")
+    while thrust >= 20000:
+      self._cf.commander.send_setpoint(roll, pitch, yawrate, thrust)
+      time.sleep(0.1)
+      if thrust >= 25000:
+        thrust_mult = -1
+      thrust += thrust_step * thrust_mult
 
     logger.info("Motor ramp test completed. Killing motors.")
-    self._cf.commander.send_setpoint(0, 0, 0, 0)  # Kill motors
+    self._cf.commander.send_setpoint(0, 0, 0, 0)
     # Make sure that the last packet leaves before the link is closed
+    # since the message queue is not flushed before closing
     time.sleep(0.1)
 
-  def _setup_logging(self, variables):
+  def _setup_logging(self, variables, writer_key):
     """
-    Set up logging for the specified variables.
+    Set up logging for a group of variables.
     """
-
-    log_config = LogConfig(name='ramp_test', period_in_ms=50)
+    log_config = LogConfig(name=writer_key, period_in_ms=50)
     for variable in variables:
       try:
         log_config.add_variable(variable, 'float')
@@ -111,21 +127,26 @@ class ESPDrone():
 
     try:
       self._cf.log.add_config(log_config)
-      log_config.data_received_cb.add_callback(self._log_callback)
+      log_config.data_received_cb.add_callback(lambda ts, data, lc: self._log_callback(ts, data, lc, writer_key))
       log_config.error_cb.add_callback(self._log_error_callback)
       log_config.start()
-      logger.info("Started logging variables.")
+      logger.info(f"Started logging variables: {variables}")
       return log_config
     except Exception as e:
-      logger.error(f"Error setting up logging: {e}")
+      logger.error(f"Error setting up logging for {writer_key}: {e}")
       sys.exit(1)
 
-  def _log_callback(self, timestamp, data, logconf):
+  def _log_callback(self, timestamp, data, logconf, writer_key):
     """
-    Callback for receiving log data.
+    Callback for log data.
     """
-    logger.info(f"Timestamp: {timestamp}, Data: {data}")
+    row = {"id": self.id_counter, "timestamp": timestamp, **data}
+    self.writers[writer_key].writerow(row)
+    logger.info(f"Logged data: {row}")
 
+    if writer_key == "data3":  # Increment ID once for each complete set of variables
+      self.id_counter += 1
+    
   def _log_error_callback(self, logconf, msg):
     """
     Callback for logging errors.
@@ -135,10 +156,15 @@ class ESPDrone():
   def test_connection(self):
     logger.info("Testing connection...")
     try:
-      self._connected(self.link_uri)
-      self._cf.close_link()
-      logger.info(f"Crazyflie Status: {self._cf.state} ({{'0': 'DISCONNECTED', '1': INITIALIZED, '2': CONNECTED, '3': SETUP_FINISHED}})")
-      logger.info("Connection test completed successfully.")
+      while self._cf.state == 1:
+        logger.info(f"0. Crazyflie Status: {self._cf.state} ({{'0': 'DISCONNECTED', '1': INITIALIZED, '2': CONNECTED, '3': SETUP_FINISHED}})")
+
+        self._connected(self.link_uri)
+        self._cf.close_link()
+        logger.info("Connection test completed successfully.")
+
+        for file in self.files.values():
+          file.close()
     except Exception as e:
       logger.error(f"Error during connection test: {e}")
       sys.exit(1)
