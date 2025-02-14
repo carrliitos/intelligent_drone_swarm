@@ -22,22 +22,6 @@ class ESPDrone():
     self._cf = Crazyflie(rw_cache='./cache')
     self.link_uri = link_uri
 
-    self.id_counter = 0  # Unique identifier for data rows
-    # File handles and CSV writers
-    self.files = {
-      "data1": open(f"{directory}/data/drone_data1.csv", mode="w", newline=""),
-      "data2": open(f"{directory}/data/drone_data2.csv", mode="w", newline=""),
-      "data3": open(f"{directory}/data/drone_data3.csv", mode="w", newline="")
-    }
-    self.writers = {
-      "data1": csv.DictWriter(self.files["data1"], fieldnames=["id", "timestamp", "pm.batteryLevel", "motor.m1", "motor.m2", "motor.m3", "motor.m4"]),
-      "data2": csv.DictWriter(self.files["data2"], fieldnames=["id", "timestamp", "stabilizer.roll", "stabilizer.pitch", "stabilizer.yaw", "stabilizer.thrust"]),
-      "data3": csv.DictWriter(self.files["data3"], fieldnames=["id", "timestamp", "gyro.x", "gyro.y", "gyro.z"])
-    }
-
-    for writer in self.writers.values():
-      writer.writeheader()
-
     self._cf.connected.add_callback(self._connected)
     self._cf.disconnected.add_callback(self._disconnected)
     self._cf.connection_failed.add_callback(self._connection_failed)
@@ -93,13 +77,6 @@ class ESPDrone():
     # Unlock startup thrust protection and send idle commands
     logger.info("Sending initial idle setpoints to stabilize logging...")
     self._cf.commander.send_setpoint(0, 0, 0, 0)
-
-    log_configs = [
-      (["pm.batteryLevel", "motor.m1", "motor.m2", "motor.m3", "motor.m4"], "data1"),
-      (["stabilizer.roll", "stabilizer.pitch", "stabilizer.yaw", "stabilizer.thrust"], "data2"),
-      (["gyro.x", "gyro.y", "gyro.z"], "data3")
-    ]
-    self.active_configs = [self._setup_logging(vars, writer) for vars, writer in log_configs]
 
     while thrust >= 20000:
       self._cf.commander.send_setpoint(roll, pitch, yawrate, thrust)
@@ -162,9 +139,6 @@ class ESPDrone():
         self._connected(self.link_uri)
         self._cf.close_link()
         logger.info("Connection test completed successfully.")
-
-        for file in self.files.values():
-          file.close()
     except Exception as e:
       logger.error(f"Error during connection test: {e}")
       sys.exit(1)
