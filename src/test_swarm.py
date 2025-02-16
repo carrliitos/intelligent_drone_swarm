@@ -4,7 +4,7 @@ from pathlib import Path
 
 from utils import logger
 from utils import context
-from drone_connections import ESPDrone
+from drone_connections_swarm import ESPDrone
 
 import cflib
 
@@ -16,12 +16,12 @@ logger = logger.setup_logger(logger_name, logger_file)
 
 def main():
   cflib.crtp.init_drivers(enable_debug_driver=False)
-  drone_udp = "udp://192.168.43.42:2390"
+  udp_list = {"udp://192.168.43.42:2390"}
 
-  le = ESPDrone(drone_udp)
+  le = ESPDrone()
   try:
     while True:
-      le.connect()
+      le.start()
   except Exception as e:
     logger.error(f"Error: {e}")
     sys.exit(1)
