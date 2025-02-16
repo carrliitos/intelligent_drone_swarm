@@ -4,7 +4,7 @@ from pathlib import Path
 
 from utils import logger
 from utils import context
-from esp_drone import ESPDrone
+from drone_connections import ESPDrone
 
 import cflib
 
@@ -20,7 +20,7 @@ def main():
 
   le = ESPDrone(drone_udp)
   try:
-    le.test_connection()
+    le.connect()
   except Exception as e:
     logger.error(f"Error: {e}")
     sys.exit(1)
