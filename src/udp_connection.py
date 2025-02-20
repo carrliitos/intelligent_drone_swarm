@@ -94,7 +94,7 @@ class ESPDrone:
     thrust_step = 100
     thrust_lower_limit = 10000
     thrust = thrust_lower_limit
-    roll = 0
+    roll = 10
     pitch = 0
     yawrate = 0
 
