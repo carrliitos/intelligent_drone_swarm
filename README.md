@@ -146,3 +146,26 @@ be registered for a predefined port at the communication link layer.
 
 Details of the use of each port can be found at [CRTP - Communicate with Crazyflie](https://www.bitcraze.io/documentation/repository/crazyflie-firmware/master/functional-areas/crtp/).
 
+
+### Hardware
+
+### LEDs
+
+=================== ===== =================
+Status               LED   Action
+=================== ===== =================
+POWER_ON            WHITE Fully lit
+SENSORS CALIBRATION BLUE  Blinking slowly
+SYSTEM READY        BLUE  Blinking
+UDP_RX              GREEN Blinking
+LOW_POWER           RED   Fully lit
+=================== ===== =================
+
+### Buttons
+
+======= ======= ==============
+Buttons   IO     Function
+======= ======= ==============
+SW1     GPIO1   Boot, Normal
+SW2     EN      Reset
+======= ======= ==============
