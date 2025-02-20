@@ -151,6 +151,7 @@ Details of the use of each port can be found at [CRTP - Communicate with Crazyfl
 
 ### LEDs
 
+```
 =================== ===== =================
 Status               LED   Action
 =================== ===== =================
@@ -160,12 +161,15 @@ SYSTEM READY        BLUE  Blinking
 UDP_RX              GREEN Blinking
 LOW_POWER           RED   Fully lit
 =================== ===== =================
+```
 
 ### Buttons
 
+```
 ======= ======= ==============
 Buttons   IO     Function
 ======= ======= ==============
 SW1     GPIO1   Boot, Normal
 SW2     EN      Reset
 ======= ======= ==============
+```
