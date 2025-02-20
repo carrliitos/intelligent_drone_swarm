@@ -1,6 +1,7 @@
 import os
 import sys
 import threading
+import time
 from threading import Thread
 from pathlib import Path
 
@@ -84,6 +85,32 @@ class ESPDrone:
     except Exception as e:
       logger.error(f"Error during connection attempt: {e}")
       sys.exit(1)
+
+  def thrust__gradual(self, thrust_limit):
+    """
+    Testing only. Gradual increase to target thrust limit.
+    """
+    thrust_mult = 1
+    thrust_step = 100
+    thrust_lower_limit = 10000
+    thrust = thrust_lower_limit
+    roll = 0
+    pitch = 0
+    yawrate = 0
+
+    self._cf.commander.send_setpoint(0, 0, 0, 0)
+
+    while thrust < thrust_limit:
+      logger.info(f"Current thrust: {thrust}")
+      self._cf.commander.send_setpoint(roll, pitch, yawrate, thrust)
+      time.sleep(0.1)
+      thrust += thrust_step * thrust_mult
+
+      if thrust > thrust_limit:
+        thrust = thrust_limit
+
+    logger.info(f"Thrust limit reached: {thrust_limit}.")
+    self._cf.commander.send_setpoint(roll, pitch, yawrate, thrust)
 
   def thrust(self, thrust):
     roll = 0
