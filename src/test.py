@@ -22,8 +22,8 @@ def main():
   try:
     while True:
       le.connect()
-      # le.thrust__gradual(20000)
-      # le.thrust(20000)
+      le.thrust__gradual(25000)
+      #le.thrust_test(15000)
   except Exception as e:
     logger.error(f"Error: {e}")
     sys.exit(1)

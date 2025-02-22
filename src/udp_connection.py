@@ -16,6 +16,11 @@ logger = logger.setup_logger(logger_name, f"{directory}/logs/{logger_name}.log")
 
 
 class ESPDrone:
+  #keep variables out of while loop to stop pulsing issue.
+  thrust_lower_limit = 10000
+  thrust = thrust_lower_limit
+  is_good = False
+
   def __init__(self, link_uri):
     self.link_uri = link_uri
     self._cf = Crazyflie(rw_cache='./cache')
@@ -91,28 +96,31 @@ class ESPDrone:
     Testing only. Gradual increase to target thrust limit.
     """
     thrust_mult = 1
-    thrust_step = 100
-    thrust_lower_limit = 10000
-    thrust = thrust_lower_limit
+    thrust_step = 10
+    # thrust_lower_limit = 10000
+    # thrust = thrust_lower_limit
     roll = 0
     pitch = 0
     yawrate = 0
 
-    self._cf.commander.send_setpoint(0, 0, 0, 0)
+    #self._cf.commander.send_setpoint(0, 0, 0, 0)
 
-    while thrust < thrust_limit:
-      logger.info(f"Current thrust: {thrust}")
+    if ESPDrone.thrust > thrust_limit:
+      ESPDrone.thrust = thrust_limit
+
+    if ESPDrone.thrust < thrust_limit:
+      logger.info(f"Current thrust: {ESPDrone.thrust}")
+      self._cf.commander.send_setpoint(roll, pitch, yawrate, ESPDrone.thrust)
+      time.sleep(0.001)
+      ESPDrone.thrust += thrust_step * thrust_mult
+
+    else:
+      logger.info(f"Thrust limit reached: {thrust_limit}.")
+      thrust = ESPDrone.thrust
       self._cf.commander.send_setpoint(roll, pitch, yawrate, thrust)
-      time.sleep(0.1)
-      thrust += thrust_step * thrust_mult
+      time.sleep(0.001)
 
-      if thrust > thrust_limit:
-        thrust = thrust_limit
-
-    logger.info(f"Thrust limit reached: {thrust_limit}.")
-    self._cf.commander.send_setpoint(roll, pitch, yawrate, thrust)
-
-  def thrust(self, thrust):
+  def thrust_test(self, thrust):
     roll = 0
     pitch = 0
     yawrate = 0
