@@ -2,6 +2,13 @@ LINEAR_PR = True     # Linear Pitch and Roll -- the calculation for pitch and ro
 LINEAR_THRUST = True # Linear Thrust         -- the calculation for thrust follows a linear transformation.
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
+
+@dataclass
+class FlightSettings:
+  pitch_rate: float
+  yaw_rate: float
+  max_thrust: float
 
 class CrazyFlieDataProviderProtocol(ABC):
   @property
