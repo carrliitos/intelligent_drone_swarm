@@ -10,7 +10,8 @@ from command_helper import (
   CommandHelper, 
   CrazyFlieXProvideable, 
   CrazyFlieYProvideable, 
-  CrazyFlieDataProvider
+  CrazyFlieDataProvider,
+  FlightSettings
 )
 
 import cflib
@@ -22,7 +23,6 @@ logger_file = f"{directory}/logs/{logger_file_name}.log"
 logger = logger.setup_logger(logger_name, logger_file)
 
 def main():
-  cflib.crtp.init_drivers(enable_debug_driver=False)
   drone_udp = "udp://192.168.43.42:2390"
 
   le = UDPConnection(drone_udp)
@@ -35,14 +35,11 @@ def main():
   yaw_provider = CrazyFlieDataProvider(y_provider)
   thrust_provider = CrazyFlieDataProvider(y_provider) 
 
-  settings = {"pitchRate": 0.8, "yawRate": 0.6, "maxThrust": 20000}
+  settings = FlightSettings(pitch_rate=0.8, yaw_rate=0.6, max_thrust=20000)
+  command_helper = CommandHelper(pitch_provider, roll_provider, yaw_provider, thrust_provider, settings.__dict__)
   try:
     le.connect()
-    command_helper = CommandHelper(pitch_provider, 
-                                   roll_provider, 
-                                   yaw_provider, 
-                                   thrust_provider, 
-                                   settings)
+
     while True:
       command_helper.prepare_data()
       if int(time.time()) % 5 == 0:
@@ -65,4 +62,5 @@ def main():
     sys.exit(1)
 
 if __name__ == '__main__':
+  cflib.crtp.init_drivers(enable_debug_driver=False)
   main()

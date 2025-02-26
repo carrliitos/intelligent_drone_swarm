@@ -102,11 +102,10 @@ class UDPConnection:
       logger.info(f"Current thrust: {self.thrust}")
       self._cf.commander.send_setpoint(roll, pitch, yawrate, self.thrust)
       time.sleep(0.001)
-      self.thrust += thrust_step * thrust_mult
+      self.thrust = min(self.thrust + thrust_step * thrust_mult, thrust_limit)  # Clamp to thrust_limit
     else:
       logger.info(f"Thrust limit reached: {thrust_limit}.")
-      thrust = self.thrust
-      self._cf.commander.send_setpoint(roll, pitch, yawrate, thrust)
+      self._cf.commander.send_setpoint(roll, pitch, yawrate, self.thrust)
       time.sleep(0.001)
 
   def _thrust(self, thrust):
