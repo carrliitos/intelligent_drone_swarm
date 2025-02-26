@@ -15,7 +15,7 @@ logger_name = Path(__file__).stem
 logger = logger.setup_logger(logger_name, f"{directory}/logs/{logger_name}.log")
 
 
-class ESPDrone:
+class UDPConnection:
   def __init__(self, link_uri):
     self.link_uri = link_uri
     self._cf = Crazyflie(rw_cache='./cache')
@@ -29,6 +29,8 @@ class ESPDrone:
 
     # Open link to Crazyflie
     self._cf.open_link(link_uri)
+
+    self.thrust_lower_limit = self.thrust = 15000
 
     logger.info(f"Connecting to {self.link_uri}")
 
@@ -86,36 +88,37 @@ class ESPDrone:
       logger.error(f"Error during connection attempt: {e}")
       sys.exit(1)
 
-  def thrust__gradual(self, thrust_limit):
+  def thrust__gradual(self, thrust_limit, roll, pitch, yawrate):
     """
     Testing only. Gradual increase to target thrust limit.
     """
     thrust_mult = 1
-    thrust_step = 100
-    thrust_lower_limit = 10000
-    thrust = thrust_lower_limit
-    roll = 0
-    pitch = 0
-    yawrate = 0
+    thrust_step = 500
 
-    self._cf.commander.send_setpoint(0, 0, 0, 0)
+    if self.thrust > thrust_limit:
+      self.thrust = thrust_limit
 
-    while thrust < thrust_limit:
-      logger.info(f"Current thrust: {thrust}")
+    if self.thrust < thrust_limit:
+      logger.info(f"Current thrust: {self.thrust}")
+      self._cf.commander.send_setpoint(roll, pitch, yawrate, self.thrust)
+      time.sleep(0.001)
+      self.thrust += thrust_step * thrust_mult
+    else:
+      logger.info(f"Thrust limit reached: {thrust_limit}.")
+      thrust = self.thrust
       self._cf.commander.send_setpoint(roll, pitch, yawrate, thrust)
-      time.sleep(0.1)
-      thrust += thrust_step * thrust_mult
+      time.sleep(0.001)
 
-      if thrust > thrust_limit:
-        thrust = thrust_limit
-
-    logger.info(f"Thrust limit reached: {thrust_limit}.")
-    self._cf.commander.send_setpoint(roll, pitch, yawrate, thrust)
-
-  def thrust(self, thrust):
+  def _thrust(self, thrust):
     roll = 0
     pitch = 0
     yawrate = 0
+    self._cf.commander.send_setpoint(0, 0, 0, 0)
+    
+    while thrust:
+      self._cf.commander.send_setpoint(roll, pitch, yawrate, thrust)
+
+  def _thrust(self, thrust, roll, pitch, yawrate):
     self._cf.commander.send_setpoint(0, 0, 0, 0)
     
     while thrust:
