@@ -41,3 +41,9 @@ class CrazyFlieDataProvider:
       self.provider = SimpleYDataProvider(provider)
     else:
       raise TypeError("Unsupported provider type")
+
+class BoundsValue:
+  def __init__(self, min_value: float, max_value: float, value: float = 0):
+    self.min_value = min_value
+    self.max_value = max_value
+    self.value = value
