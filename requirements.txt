@@ -1,10 +1,9 @@
 cflib @ git+https://github.com/leeebo/crazyflie-lib-python.git@a430283a3b608db7c0b3227aa37d7120858c25ef
-drone==0.3.0
 future==1.0.0
 importlib_resources==6.4.5
 libusb-package
 network==0.1
-numpy==1.26.4
+numpy==1.20
 pandas==2.2.3
 python-dateutil==2.9.0.post0
 pytz==2024.2
