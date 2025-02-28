@@ -63,9 +63,9 @@ class CommandHelper:
     self.thrust_provider = thrust_provider
     self.allow_negative_values = allow_negative_values
 
-    self.pitch_rate = settings["pitchRate"]
-    self.yaw_rate = settings["yawRate"]
-    self.max_thrust = settings["maxThrust"]
+    self.pitch_rate = settings["pitch_rate"]
+    self.yaw_rate = settings["yaw_rate"]
+    self.max_thrust = settings["max_thrust"]
 
     self.pitch_bounds = BoundsValue(0, 1)
     self.roll_bounds = BoundsValue(0, 1)

@@ -74,7 +74,7 @@ class UDPConnection:
 
   def _idle(self):
     """Sends a zero-setpoint command to keep the Crazyflie active."""
-    self._cf.commander.send_setpoint(0, 0, 0, 0)
+    self._cf.commander.send_position_setpoint(0, 0, 0, 0)
     self._start_timer()  # Restart for continuous updates
 
   def connect(self):
@@ -93,32 +93,28 @@ class UDPConnection:
     Testing only. Gradual increase to target thrust limit.
     """
     thrust_mult = 1
-    thrust_step = 500
+    thrust_step = 100
 
     if self.thrust > thrust_limit:
       self.thrust = thrust_limit
 
     if self.thrust < thrust_limit:
-      logger.info(f"Current thrust: {self.thrust}")
-      self._cf.commander.send_setpoint(roll, pitch, yawrate, self.thrust)
-      time.sleep(0.001)
+      self._cf.commander.send_position_setpoint(roll, pitch, yawrate, self.thrust)
       self.thrust = min(self.thrust + thrust_step * thrust_mult, thrust_limit)  # Clamp to thrust_limit
     else:
-      logger.info(f"Thrust limit reached: {thrust_limit}.")
-      self._cf.commander.send_setpoint(roll, pitch, yawrate, self.thrust)
-      time.sleep(0.001)
+      self._cf.commander.send_position_setpoint(roll, pitch, yawrate, self.thrust)
 
   def _thrust(self, thrust):
     roll = 0
     pitch = 0
     yawrate = 0
-    self._cf.commander.send_setpoint(0, 0, 0, 0)
+    self._cf.commander.send_position_setpoint(0, 0, 0, 0)
     
     while thrust:
-      self._cf.commander.send_setpoint(roll, pitch, yawrate, thrust)
+      self._cf.commander.send_position_setpoint(roll, pitch, yawrate, thrust)
 
   def _thrust(self, thrust, roll, pitch, yawrate):
-    self._cf.commander.send_setpoint(0, 0, 0, 0)
+    self._cf.commander.send_position_setpoint(0, 0, 0, 0)
     
     while thrust:
-      self._cf.commander.send_setpoint(roll, pitch, yawrate, thrust)
+      self._cf.commander.send_position_setpoint(roll, pitch, yawrate, thrust)
