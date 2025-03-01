@@ -14,6 +14,7 @@ from command_helper import (
   FlightSettings
 )
 from command import Command
+from drone_logs import DroneLogs
 
 import cflib
 
@@ -26,8 +27,9 @@ logger = logger.setup_logger(logger_name, logger_file)
 def main():
   drone_udp = "udp://192.168.43.42:2390"
 
-  le = UDPConnection(drone_udp)  # Establish UDP connection
-  command = Command(le._cf)  # Create a command instance using the Crazyflie object
+  drone = UDPConnection(drone_udp)  # Establish UDP connection
+  command = Command(drone._cf)      # Command instance
+  logs = DroneLogs(drone._cf)       # Initialize logging system
 
   x_provider = CrazyFlieXProvideable(x=0.5)
   y_provider = CrazyFlieYProvideable(y=0.3)
@@ -41,7 +43,10 @@ def main():
   command_helper = CommandHelper(pitch_provider, roll_provider, yaw_provider, thrust_provider, settings.__dict__)
 
   try:
-    le.connect()
+    drone.connect()
+    # Start logs -- these should be after connection,
+    # but not inside the while loop.
+    logs.start_logging()
 
     while True:
       command_helper.prepare_data()
