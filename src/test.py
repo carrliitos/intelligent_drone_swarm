@@ -37,7 +37,7 @@ def main():
   yaw_provider = CrazyFlieDataProvider(y_provider)
   thrust_provider = CrazyFlieDataProvider(y_provider)
 
-  settings = FlightSettings(pitch_rate=0.8, yaw_rate=0.8, max_thrust=10000)
+  settings = FlightSettings(pitch_rate=0.8, yaw_rate=0.8, max_thrust=20000)
   command_helper = CommandHelper(pitch_provider, roll_provider, yaw_provider, thrust_provider, settings.__dict__)
 
   try:

@@ -27,8 +27,8 @@ class DroneLogs:
     # self.log_variables = ["pm.vbatMV", "pwm.m1_pwm", "pwm.m2_pwm", "pwm.m3_pwm", "pwm.m4_pwm"]
     # self.log_variables = ["controller.cmd_thrust", "controller.cmd_roll", "controller.cmd_pitch", "controller.cmd_yaw"]
     # self.log_variables = ["controller.roll", "controller.pitch", "controller.yaw"]
-    # self.log_variables = ["motor.m1", "motor.m2", "motor.m3", "motor.m4"]
-    self.log_variables = ["gyro.x", "gyro.y", "gyro.z"]
+    self.log_variables = ["motor.m1", "motor.m2", "motor.m3", "motor.m4"]
+    # self.log_variables = ["gyro.x", "gyro.y", "gyro.z"]
 
   def start_logging(self):
     """
@@ -54,10 +54,11 @@ class DroneLogs:
     """
     Log power and motor data from the ESP-Drone.
     """
-    log_config = LogConfig(name='battery_motor', period_in_ms=100)
+    log_config = LogConfig(name='battery_motor', period_in_ms=200)
     try:
       for var in self.log_variables:
-        log_config.add_variable(var, 'float')
+        # log_config.add_variable(var, 'float')
+        log_config.add_variable(var, 'uint32_t') # only for the `motor` group
 
       self._cf.log.add_config(log_config)
       log_config.data_received_cb.add_callback(self._log_callback)
