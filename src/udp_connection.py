@@ -4,11 +4,11 @@ import threading
 import time
 from threading import Thread
 from pathlib import Path
-
-from utils import logger, context
-
 import cflib
 from cflib.crazyflie import Crazyflie
+
+from utils import logger, context
+from drone_logs import DroneLogs
 
 directory = context.get_context(os.path.abspath(__file__))
 logger_name = Path(__file__).stem
@@ -17,9 +17,16 @@ logger = logger.setup_logger(logger_name, f"{directory}/logs/{logger_name}.log")
 
 class UDPConnection:
   def __init__(self, link_uri):
+    """
+    Handles establishing a UDP connection to the Crazyflie drone.
+    
+    Args:
+      link_uri (str): The URI of the UDP connection.
+    """
     self.link_uri = link_uri
     self._cf = Crazyflie(rw_cache='./cache')
     self.timer = None
+    self.logs = DroneLogs(self._cf)
 
     # Register connection callbacks
     self._cf.connected.add_callback(self._connected)
@@ -30,50 +37,42 @@ class UDPConnection:
     # Open link to Crazyflie
     self._cf.open_link(link_uri)
 
-    self.thrust_lower_limit = self.thrust = 15000
-
     logger.info(f"Connecting to {self.link_uri}")
 
   def _connected(self, link_uri):
     """
     Callback triggered when the Crazyflie successfully connects.
-
-    Start the idle loop in a separate thread.
+    Logging starts once successfully connected.
     """
+    self.logs.start_logging()
     Thread(target=self._idle, daemon=True).start()
 
   def _disconnected(self, link_uri):
-    """
-    Callback triggered when the Crazyflie disconnects.
-    """
+    """ Callback triggered when the Crazyflie disconnects. """
     logger.info(f"Disconnected from {link_uri}")
 
   def _connection_failed(self, link_uri, msg):
-    """
-    Callback triggered when the initial connection attempt fails.
-    """
+    """ Callback triggered when the initial connection attempt fails. """
     logger.error(f"Connection to {link_uri} failed: {msg}")
 
   def _connection_lost(self, link_uri, msg):
-    """
-    Callback triggered when the connection is lost after being established.
-    """
+    """ Callback triggered when the connection is lost after being established. """
     logger.error(f"Connection to {link_uri} lost: {msg}")
 
   def _start_timer(self):
-    """Starts a recurring timer to send idle commands to the drone."""
+    """ Starts a recurring timer to send idle commands to the drone. """
     self._stop_timer()  # Ensure no duplicate timers
     self.timer = threading.Timer(0.05, self._idle)
     self.timer.start()
 
   def _stop_timer(self):
-    """Stops the active timer if it exists."""
+    """ Stops the active timer if it exists. """
     if self.timer:
       self.timer.cancel()
       self.timer = None
 
   def _idle(self):
-    """Sends a zero-setpoint command to keep the Crazyflie active."""
+    """ Sends a zero-setpoint command to keep the Crazyflie active. """
     self._cf.commander.send_setpoint(0, 0, 0, 0)
     self._start_timer()  # Restart for continuous updates
 
@@ -87,38 +86,3 @@ class UDPConnection:
     except Exception as e:
       logger.error(f"Error during connection attempt: {e}")
       sys.exit(1)
-
-  def thrust__gradual(self, thrust_limit, roll, pitch, yawrate):
-    """
-    Testing only. Gradual increase to target thrust limit.
-    """
-    thrust_mult = 1
-    thrust_step = 500
-
-    if self.thrust > thrust_limit:
-      self.thrust = thrust_limit
-
-    if self.thrust < thrust_limit:
-      logger.info(f"Current thrust: {self.thrust}")
-      self._cf.commander.send_setpoint(roll, pitch, yawrate, self.thrust)
-      time.sleep(0.001)
-      self.thrust = min(self.thrust + thrust_step * thrust_mult, thrust_limit)  # Clamp to thrust_limit
-    else:
-      logger.info(f"Thrust limit reached: {thrust_limit}.")
-      self._cf.commander.send_setpoint(roll, pitch, yawrate, self.thrust)
-      time.sleep(0.001)
-
-  def _thrust(self, thrust):
-    roll = 0
-    pitch = 0
-    yawrate = 0
-    self._cf.commander.send_setpoint(0, 0, 0, 0)
-    
-    while thrust:
-      self._cf.commander.send_setpoint(roll, pitch, yawrate, thrust)
-
-  def _thrust(self, thrust, roll, pitch, yawrate):
-    self._cf.commander.send_setpoint(0, 0, 0, 0)
-    
-    while thrust:
-      self._cf.commander.send_setpoint(roll, pitch, yawrate, thrust)

@@ -63,9 +63,9 @@ class CommandHelper:
     self.thrust_provider = thrust_provider
     self.allow_negative_values = allow_negative_values
 
-    self.pitch_rate = settings["pitchRate"]
-    self.yaw_rate = settings["yawRate"]
-    self.max_thrust = settings["maxThrust"]
+    self.pitch_rate = settings["pitch_rate"]
+    self.yaw_rate = settings["yaw_rate"]
+    self.max_thrust = settings["max_thrust"]
 
     self.pitch_bounds = BoundsValue(0, 1)
     self.roll_bounds = BoundsValue(0, 1)
@@ -158,5 +158,6 @@ class CommandHelper:
     Returns:
         float: The computed thrust adjustment, clamped between 0 and 65535.
     """
-    thrust = control * 65535 * (self.max_thrust / 100) if LINEAR_THRUST else (control ** 0.5) * 65535 * (self.max_thrust / 100)
-    return min(max(thrust, 0), 65535)
+    control = max(control, 0)  # Ensure non-negative input
+    thrust = control * self.max_thrust if LINEAR_THRUST else (control ** 0.5) * self.max_thrust
+    return min(max(thrust, 0), self.max_thrust)
