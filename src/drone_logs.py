@@ -21,63 +21,53 @@ class DroneLogs:
       cf (Crazyflie): The Crazyflie instance for logging.
     """
     self._cf = cf
-    self.id_counter = 0  # Unique identifier for data rows
     self.log_config = None
-
-    self.log_variables = ["pm.batteryLevel", "motor.m1", "motor.m2", "motor.m3", "motor.m4"]
+    self.log_variables = ["pm.vbatMV", "pwm.m1_pwm", "pwm.m2_pwm", "pwm.m3_pwm", "pwm.m4_pwm"]
 
   def start_logging(self):
     """
-    Ensures the TOC is fully loaded before logging starts.
+    Starts logging after sending initial setpoints.
     """
-    logger.info("Waiting for Crazyflie TOC to be ready...")
+    logger.info("Sending initial idle setpoints to stabilize logging...")
+    self._cf.commander.send_setpoint(0, 0, 0, 0)
+    time.sleep(0.1)  # Give drone time to stabilize
 
-    # Wait until TOC is ready! (max 10 seconds) -- idk if 10 seconds is too long
-    timeout = 10  # seconds
-    start_time = time.time()
-    while not self._cf.param.toc.toc or len(self._cf.param.toc.toc) == 0:
-      if time.time() - start_time > timeout:
-        logger.error("TOC failed to load in time. Logging aborted.")
-        return
-      time.sleep(0.5)
+    log_config = self._setup_logging(self.log_variables)
+    if log_config:
+      logger.info("Logging started successfully.")
+    else:
+      logger.error("Failed to start logging.")
 
-    logger.info("TOC is ready. Starting logging...")
-
-    self.log_config = LogConfig(name="motor_battery", period_in_ms=50)
-    for var in self.log_variables:
+  def _setup_logging(self, variables):
+    """
+    Set up logging for the specified variables.
+    """
+    log_config = LogConfig(name='motor_battery', period_in_ms=50)
+    for variable in variables:
       try:
-        self.log_config.add_variable(var, 'float')
+        log_config.add_variable(variable, 'float')
       except KeyError:
-        logger.warning(f"Variable {var} not found in TOC.")
+        logger.warning(f"Variable {variable} not found in TOC.")
 
     try:
-      self._cf.log.add_config(self.log_config)
-      self.log_config.data_received_cb.add_callback(self._log_callback)
-      self.log_config.error_cb.add_callback(self._log_error_callback)
-      self.log_config.start()
-      logger.info(f"Started logging: {self.log_variables}")
+      self._cf.log.add_config(log_config)
+      log_config.data_received_cb.add_callback(self._log_callback)
+      log_config.error_cb.add_callback(self._log_error_callback)
+      log_config.start()
+      logger.info("Started logging variables.")
+      return log_config
     except Exception as e:
       logger.error(f"Error setting up logging: {e}")
-      sys.exit(1)
+      return None
 
   def _log_callback(self, timestamp, data, logconf):
     """
-    Callback for log data.
-    Logs battery level and motor values to the console.
+    Callback for receiving log data.
     """
-    log_entry = {
-      "timestamp": timestamp,
-      "pm.batteryLevel": data.get("pm.batteryLevel", "N/A"),
-      "motor.m1": data.get("motor.m1", "N/A"),
-      "motor.m2": data.get("motor.m2", "N/A"),
-      "motor.m3": data.get("motor.m3", "N/A"),
-      "motor.m4": data.get("motor.m4", "N/A"),
-    }
-    logger.info(f"Drone Log: {log_entry}")
-    self.id_counter += 1
+    logger.info(f"Timestamp: {timestamp}, Data: {data}")
 
   def _log_error_callback(self, logconf, msg):
     """
     Callback for logging errors.
     """
-    logger.error(f"Logging error: {msg}")
+    logger.error(f"LogConfig {logconf} error: {msg}")
