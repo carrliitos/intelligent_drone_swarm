@@ -12,7 +12,7 @@ class Command:
     self._cf = cf
     self.thrust = initial_thrust  # Initialize thrust level
 
-  def thrust_gradual(self, thrust_limit, roll, pitch, yawrate, step=100, delay=0.05):
+  def thrust_gradual(self, thrust_limit, roll, pitch, yawrate, step=100, delay=0.25):
     """
     Gradually increases thrust to the specified thrust limit.
 
