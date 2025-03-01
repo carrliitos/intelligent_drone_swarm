@@ -24,7 +24,11 @@ class DroneLogs:
     """
     self._cf = cf
     self.log_config = None
-    self.log_variables = ["pm.vbatMV", "pwm.m1_pwm", "pwm.m2_pwm", "pwm.m3_pwm", "pwm.m4_pwm"]
+    # self.log_variables = ["pm.vbatMV", "pwm.m1_pwm", "pwm.m2_pwm", "pwm.m3_pwm", "pwm.m4_pwm"]
+    # self.log_variables = ["controller.cmd_thrust", "controller.cmd_roll", "controller.cmd_pitch", "controller.cmd_yaw"]
+    # self.log_variables = ["controller.roll", "controller.pitch", "controller.yaw"]
+    # self.log_variables = ["motor.m1", "motor.m2", "motor.m3", "motor.m4"]
+    self.log_variables = ["gyro.x", "gyro.y", "gyro.z"]
 
   def start_logging(self):
     """
@@ -33,6 +37,12 @@ class DroneLogs:
     logger.info("Waiting for TOC to be downloaded...")
     while self._cf.log.toc is None or not self._cf.log.toc.toc:
       time.sleep(0.1)
+
+    # logger.info("TOC Contents:")
+    # toc = self._cf.log.toc
+    # for element_id, element in toc.toc.items():
+    #   # logger.info(f"TOC Element: {element.group}.{element.name} (type: {element.ctype})")
+    #   logger.debug(f"{element_id}: {element}")
 
     logger.info("TOC downloaded. Starting logging...")
     
