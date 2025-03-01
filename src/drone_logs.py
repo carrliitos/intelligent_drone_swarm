@@ -26,48 +26,68 @@ class DroneLogs:
 
   def start_logging(self):
     """
-    Starts logging after sending initial setpoints.
+    Ensures the TOC is fully loaded before starting logging.
     """
-    logger.info("Sending initial idle setpoints to stabilize logging...")
-    self._cf.commander.send_setpoint(0, 0, 0, 0)
-    time.sleep(0.1)  # Give drone time to stabilize
+    logger.info("Waiting for TOC to be downloaded...")
+    while self._cf.log.toc is None or not self._cf.log.toc.toc:
+      time.sleep(0.1)  # Ensure the TOC has loaded before proceeding
 
-    log_config = self._setup_logging(self.log_variables)
-    if log_config:
-      logger.info("Logging started successfully.")
-    else:
-      logger.error("Failed to start logging.")
+    # Log TOC contents for debugging
+    logger.info("TOC Contents:")
+    toc = self._cf.log.toc
+    for element_id, element in toc.toc.items():
+      logger.debug(f"{element_id}: {element}")
 
-  def _setup_logging(self, variables):
+    logger.info("TOC downloaded. Starting logging...")
+    
+    # Start logging in a separate thread to avoid blocking
+    log_thread = threading.Thread(target=self._log_battery_motor_data)
+    log_thread.start()
+
+  def _log_battery_motor_data(self):
     """
-    Set up logging for the specified variables.
+    Log power and motor data from the ESP-Drone.
     """
-    log_config = LogConfig(name='motor_battery', period_in_ms=50)
-    for variable in variables:
-      try:
-        log_config.add_variable(variable, 'float')
-      except KeyError:
-        logger.warning(f"Variable {variable} not found in TOC.")
-
+    log_config = LogConfig(name='battery_motor', period_in_ms=100)
     try:
+      for var in self.log_variables:
+        log_config.add_variable(var, 'float')
+
       self._cf.log.add_config(log_config)
       log_config.data_received_cb.add_callback(self._log_callback)
       log_config.error_cb.add_callback(self._log_error_callback)
       log_config.start()
-      logger.info("Started logging variables.")
-      return log_config
+      logger.info("Started logging battery & motor data.")
+
+      time.sleep(10)  # Adjust duration as needed
+    except KeyError as e:
+      logger.error(f"LogConfig error: {e}")
     except Exception as e:
-      logger.error(f"Error setting up logging: {e}")
-      return None
+      logger.error(f"Unexpected error: {e}")
+    finally:
+      if log_config.valid:
+        try:
+          log_config.stop()
+          logger.info("Stopped logging battery & motor data.")
+        except Exception as e:
+          logger.error(f"Error stopping log config: {e}")
 
   def _log_callback(self, timestamp, data, logconf):
     """
     Callback for receiving log data.
     """
-    logger.info(f"Timestamp: {timestamp}, Data: {data}")
+    log_entry = {
+      "timestamp": timestamp,
+      "pm.vbatMV": data.get("pm.vbatMV", "N/A"),
+      "pwm.m1_pwm": data.get("pwm.m1_pwm", "N/A"),
+      "pwm.m2_pwm": data.get("pwm.m2_pwm", "N/A"),
+      "pwm.m3_pwm": data.get("pwm.m3_pwm", "N/A"),
+      "pwm.m4_pwm": data.get("pwm.m4_pwm", "N/A"),
+    }
+    logger.info(f"Drone Log: {log_entry}")
 
   def _log_error_callback(self, logconf, msg):
     """
     Callback for logging errors.
     """
-    logger.error(f"LogConfig {logconf} error: {msg}")
+    logger.error(f"Logging error: {msg}")
