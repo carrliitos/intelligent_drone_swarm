@@ -14,7 +14,6 @@ from command_helper import (
   FlightSettings
 )
 from command import Command
-from drone_logs import DroneLogs
 
 import cflib
 
@@ -29,7 +28,6 @@ def main():
 
   drone = UDPConnection(drone_udp)  # Establish UDP connection
   command = Command(drone._cf)      # Command instance
-  logs = DroneLogs(drone._cf)       # Initialize logging system
 
   x_provider = CrazyFlieXProvideable(x=0.5)
   y_provider = CrazyFlieYProvideable(y=0.3)
@@ -44,9 +42,6 @@ def main():
 
   try:
     drone.connect()
-    # Start logs -- these should be after connection,
-    # but not inside the while loop.
-    logs.start_logging()
 
     while True:
       command_helper.prepare_data()

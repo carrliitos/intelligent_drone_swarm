@@ -1,6 +1,8 @@
 import time
 import sys
 import os
+import threading
+from threading import Thread
 from pathlib import Path
 from cflib.crazyflie.log import LogConfig
 from utils import logger
@@ -26,21 +28,15 @@ class DroneLogs:
 
   def start_logging(self):
     """
-    Ensures the TOC is fully loaded before starting logging.
+    Starts logging after ensuring the TOC is loaded.
     """
     logger.info("Waiting for TOC to be downloaded...")
     while self._cf.log.toc is None or not self._cf.log.toc.toc:
-      time.sleep(0.1)  # Ensure the TOC has loaded before proceeding
-
-    # Log TOC contents for debugging
-    logger.info("TOC Contents:")
-    toc = self._cf.log.toc
-    for element_id, element in toc.toc.items():
-      logger.debug(f"{element_id}: {element}")
+      time.sleep(0.1)
 
     logger.info("TOC downloaded. Starting logging...")
     
-    # Start logging in a separate thread to avoid blocking
+    # Start logging in a separate thread
     log_thread = threading.Thread(target=self._log_battery_motor_data)
     log_thread.start()
 
@@ -59,32 +55,19 @@ class DroneLogs:
       log_config.start()
       logger.info("Started logging battery & motor data.")
 
-      time.sleep(10)  # Adjust duration as needed
-    except KeyError as e:
-      logger.error(f"LogConfig error: {e}")
+      time.sleep(10)
     except Exception as e:
       logger.error(f"Unexpected error: {e}")
     finally:
       if log_config.valid:
-        try:
-          log_config.stop()
-          logger.info("Stopped logging battery & motor data.")
-        except Exception as e:
-          logger.error(f"Error stopping log config: {e}")
+        log_config.stop()
+        logger.info("Stopped logging battery & motor data.")
 
   def _log_callback(self, timestamp, data, logconf):
     """
     Callback for receiving log data.
     """
-    log_entry = {
-      "timestamp": timestamp,
-      "pm.vbatMV": data.get("pm.vbatMV", "N/A"),
-      "pwm.m1_pwm": data.get("pwm.m1_pwm", "N/A"),
-      "pwm.m2_pwm": data.get("pwm.m2_pwm", "N/A"),
-      "pwm.m3_pwm": data.get("pwm.m3_pwm", "N/A"),
-      "pwm.m4_pwm": data.get("pwm.m4_pwm", "N/A"),
-    }
-    logger.info(f"Drone Log: {log_entry}")
+    logger.info(f"Timestamp: {timestamp}, Data: {data}")
 
   def _log_error_callback(self, logconf, msg):
     """

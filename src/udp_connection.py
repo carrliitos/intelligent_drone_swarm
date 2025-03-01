@@ -4,10 +4,11 @@ import threading
 import time
 from threading import Thread
 from pathlib import Path
-
-from utils import logger, context
 import cflib
 from cflib.crazyflie import Crazyflie
+
+from utils import logger, context
+from drone_logs import DroneLogs
 
 directory = context.get_context(os.path.abspath(__file__))
 logger_name = Path(__file__).stem
@@ -25,6 +26,7 @@ class UDPConnection:
     self.link_uri = link_uri
     self._cf = Crazyflie(rw_cache='./cache')
     self.timer = None
+    self.logs = DroneLogs(self._cf)
 
     # Register connection callbacks
     self._cf.connected.add_callback(self._connected)
@@ -38,7 +40,11 @@ class UDPConnection:
     logger.info(f"Connecting to {self.link_uri}")
 
   def _connected(self, link_uri):
-    """ Callback triggered when the Crazyflie successfully connects. """
+    """
+    Callback triggered when the Crazyflie successfully connects.
+    Logging starts once successfully connected.
+    """
+    self.logs.start_logging()
     Thread(target=self._idle, daemon=True).start()
 
   def _disconnected(self, link_uri):
