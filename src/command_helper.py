@@ -169,5 +169,5 @@ class CommandHelper:
         float: The computed thrust adjustment, clamped between 0 and 65535.
     """
     control = max(control, 0)  # Ensure non-negative input
-    thrust = control * 65535 * (self.max_thrust / 100) if LINEAR_THRUST else (control ** 0.5) * 65535 * (self.max_thrust / 100)
-    return min(max(thrust, 0), 65535)
+    thrust = control * self.max_thrust if LINEAR_THRUST else (control ** 0.5) * self.max_thrust
+    return min(max(thrust, 0), self.max_thrust)
