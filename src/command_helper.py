@@ -1,11 +1,3 @@
-import os
-from pathlib import Path
-from utils import logger, context
-
-directory = context.get_context(os.path.abspath(__file__))
-logger_name = Path(__file__).stem
-logger = logger.setup_logger(logger_name, f"{directory}/logs/{logger_name}.log")
-
 LINEAR_PR = True     # Linear Pitch and Roll -- the calculation for pitch and roll follows a linear transformation.
 LINEAR_THRUST = True # Linear Thrust         -- the calculation for thrust follows a linear transformation.
 
@@ -97,12 +89,10 @@ class CommandHelper:
     return self.yaw_bounds.value
 
   def prepare_data(self):
-    logger.debug(f"Thrust input value: {self.thrust_provider.provider.value}")
     self.pitch_bounds.value = self._pitch(self.pitch_provider.provider.value)
     self.roll_bounds.value = self._roll(self.roll_provider.provider.value)
     self.thrust_bounds.value = self._thrust(self.thrust_provider.provider.value)
     self.yaw_bounds.value = self._yaw(self.yaw_provider.provider.value)
-    logger.debug(f"Computed thrust: {self.thrust_bounds.value}")
   
   def _pitch(self, control: float) -> float:
     """
