@@ -28,7 +28,7 @@ def main():
   le = UDPConnection(drone_udp)
   
   x_provider = CrazyFlieXProvideable(x=0.5)
-  y_provider = CrazyFlieYProvideable(y=-0.3)
+  y_provider = CrazyFlieYProvideable(y=0.3)
  
   pitch_provider = CrazyFlieDataProvider(x_provider)
   roll_provider = CrazyFlieDataProvider(x_provider)
@@ -42,7 +42,7 @@ def main():
 
     while True:
       command_helper.prepare_data()
-      le.thrust__gradual(thrust_limit=30000,
+      le.thrust__gradual(thrust_limit=command_helper.thrust,
                          roll=command_helper.roll,
                          pitch=command_helper.pitch,
                          yawrate=command_helper.yaw)
