@@ -14,6 +14,8 @@ logger_name = Path(__file__).stem
 logger_file = f"{directory}/logs/{logger_file_name}.log"
 logger = logger.setup_logger(logger_name, logger_file)
 
+log_counter = 0
+
 class DroneLogs:
   def __init__(self, cf):
     """
@@ -27,7 +29,7 @@ class DroneLogs:
     # self.log_variables = ["pm.vbatMV", "pwm.m1_pwm", "pwm.m2_pwm", "pwm.m3_pwm", "pwm.m4_pwm"]
     # self.log_variables = ["controller.cmd_thrust", "controller.cmd_roll", "controller.cmd_pitch", "controller.cmd_yaw"]
     # self.log_variables = ["controller.roll", "controller.pitch", "controller.yaw"]
-    self.log_variables = ["motor.m1", "motor.m2", "motor.m3", "motor.m4"]
+    self.log_variables = ["pm.vbatMV", "motor.m1", "motor.m2", "motor.m3", "motor.m4"]
     # self.log_variables = ["gyro.x", "gyro.y", "gyro.z"]
 
   def start_logging(self):
@@ -45,9 +47,10 @@ class DroneLogs:
     #   logger.debug(f"{element_id}: {element}")
 
     logger.info("TOC downloaded. Starting logging...")
+    time.sleep(1)
     
     # Start logging in a separate thread
-    log_thread = threading.Thread(target=self._log_battery_motor_data)
+    log_thread = threading.Thread(target=self._log_battery_motor_data, daemon=True)
     log_thread.start()
 
   def _log_battery_motor_data(self):
@@ -66,7 +69,7 @@ class DroneLogs:
       log_config.start()
       logger.info("Started logging battery & motor data.")
 
-      time.sleep(10)
+      time.sleep(1000)
     except Exception as e:
       logger.error(f"Unexpected error: {e}")
     finally:
@@ -78,7 +81,7 @@ class DroneLogs:
     """
     Callback for receiving log data.
     """
-    logger.info(f"Timestamp: {timestamp}, Data: {data}")
+    logger.info(data)
 
   def _log_error_callback(self, logconf, msg):
     """
