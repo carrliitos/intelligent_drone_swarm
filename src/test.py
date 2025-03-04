@@ -1,10 +1,11 @@
 import os
 import sys
+import time
 from pathlib import Path
 
 from utils import logger
 from utils import context
-from udp_connection import ESPDrone
+from udp_connection import DroneConnection
 
 import cflib
 
@@ -18,12 +19,14 @@ def main():
   cflib.crtp.init_drivers(enable_debug_driver=False)
   drone_udp = "udp://192.168.43.42:2390"
 
-  le = ESPDrone(drone_udp)
+  le = DroneConnection(drone_udp)
   try:
+    #le.connect()
     while True:
       le.connect()
-      # le.thrust__gradual(20000)
-      # le.thrust(20000)
+      time.sleep(0.01)
+      le.gradual_thrust_test(40000)
+      #le.thrust_test(15000)
   except Exception as e:
     logger.error(f"Error: {e}")
     sys.exit(1)
