@@ -47,7 +47,7 @@ class DroneLogs:
     #   logger.debug(f"{element_id}: {element}")
 
     logger.info("TOC downloaded. Starting logging...")
-    time.sleep(1)
+    time.sleep(2)
     
     # Start logging in a separate thread
     log_thread = threading.Thread(target=self._log_battery_motor_data, daemon=True)

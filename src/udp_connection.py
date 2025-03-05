@@ -14,6 +14,7 @@ directory = context.get_context(os.path.abspath(__file__))
 logger_name = Path(__file__).stem
 logger = logger.setup_logger(logger_name, f"{directory}/logs/{logger_name}.log")
 
+active_command_in_progress = False
 
 class UDPConnection:
   def __init__(self, link_uri):
@@ -72,8 +73,13 @@ class UDPConnection:
       self.timer = None
 
   def _idle(self):
-    """ Sends a zero-setpoint command to keep the Crazyflie active. """
-    self._cf.commander.send_setpoint(0, 0, 0, 0)
+    """
+    Sends a zero-setpoint command to keep the Crazyflie active if no active 
+    command is in progress.
+    """
+    global active_command_in_progress
+    if not active_command_in_progress:
+      self._cf.commander.send_setpoint(0, 0, 0, 0)
     self._start_timer()  # Restart for continuous updates
 
   def connect(self):

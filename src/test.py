@@ -44,7 +44,10 @@ def main():
     drone.connect()
 
     while True:
+      global active_command_in_progress
       command_helper.prepare_data()
+      active_command_in_progress = True
+
       command.thrust_gradual(
         thrust_limit=command_helper.max_thrust,
         roll=command_helper.roll,
@@ -53,6 +56,9 @@ def main():
         step=500,  # Increase by 500 each step
         delay=0.05 # 50ms delay per step
       )
+
+      # Command completed
+      active_command_in_progress = False
       time.sleep(0.01)
   except KeyboardInterrupt:
     logger.info("Process interrupted. Terminating...")
