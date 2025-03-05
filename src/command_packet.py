@@ -76,16 +76,3 @@ def extract_command_packet(packet: bytes):
     raise ValueError("CRC check failed!")
 
   return header, roll, pitch, yaw, thrust, crc
-
-# Example usage
-if __name__ == "__main__":
-  # Build packet
-  packet = build_command_packet(0.1, -0.1, 0.0, 20000)
-  print(f"Built Packet: {packet.hex()}")
-
-  # Extract and verify packet
-  try:
-    header, roll, pitch, yaw, thrust, crc = extract_command_packet(packet)
-    print(f"Extracted: Header={header}, Roll={roll}, Pitch={pitch}, Yaw={yaw}, Thrust={thrust}, CRC={crc}")
-  except ValueError as e:
-    print(f"Packet extraction failed: {e}")
