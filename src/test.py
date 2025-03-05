@@ -58,8 +58,8 @@ def main():
       )
 
       # Command completed
+      time.sleep(0.05)
       active_command_in_progress = False
-      time.sleep(0.01)
   except KeyboardInterrupt:
     logger.info("Process interrupted. Terminating...")
     sys.exit(0)
