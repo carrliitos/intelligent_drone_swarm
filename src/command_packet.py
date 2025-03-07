@@ -2,29 +2,6 @@ import struct
 
 # Define packet header
 COMMANDER_HEADER = 0x30
-LOG_REQUEST_HEADER = 0x50  # Hypothetical header for log requests
-LOG_PORT = 5  # Data logging port
-
-def build_crtp_log_request(log_variable: str) -> bytes:
-  """
-  Builds a CRTP log request packet to fetch specific log variables.
-
-  Args:
-    log_variable (str): Log variable name (e.g., 'rxRate').
-
-  Returns:
-    bytes: Serialized CRTP log request packet.
-  """
-  # Create header: Port 5 (data logging), Channel 0
-  header = (LOG_PORT << 4) | 0x00  # Port in bits 4-7, Channel in bits 0-1
-
-  # Encode the log variable name as bytes (max 31 bytes for data)
-  var_bytes = log_variable.encode('utf-8')
-  payload = var_bytes.ljust(31, b'\0')  # Pad to 31 bytes if needed
-
-  # Pack the header and payload into a CRTP packet
-  packet = struct.pack('<B31s', header, payload)
-  return packet
 
 def build_command_packet(roll: float, pitch: float, yaw: float, thrust: int) -> bytes:
   """

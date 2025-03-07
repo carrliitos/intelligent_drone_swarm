@@ -1,5 +1,5 @@
 import time
-from esp_drone_udp import send_command, send_log_request, receive_packet
+from esp_drone_udp import send_command
 
 # Configuration for thrust control
 THRUST_START = 0       # Starting thrust value
@@ -36,23 +36,3 @@ def gradual_thrust_increase():
 
   except KeyboardInterrupt:
     print("Thrust control interrupted by user.")
-
-def fetch_logs():
-  """Fetch and display logs for rxRate and txRate."""
-  # Request rxRate
-  send_log_request('rxRate')
-  time.sleep(0.1)
-  rx_response = receive_packet()
-  if rx_response:
-    # Extract rxRate (assuming 2-byte uint16_t at index 1 and 2)
-    rx_rate = int.from_bytes(rx_response[1:3], 'little')
-    print(f"rxRate: {rx_rate}")
-
-  # Request txRate
-  send_log_request('txRate')
-  time.sleep(0.1)
-  tx_response = receive_packet()
-  if tx_response:
-    # Extract txRate (assuming 2-byte uint16_t at index 1 and 2)
-    tx_rate = int.from_bytes(tx_response[1:3], 'little')
-    print(f"txRate: {tx_rate}")

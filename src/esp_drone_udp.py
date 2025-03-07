@@ -1,6 +1,5 @@
 import socket
 from command_packet import build_command_packet
-from command_packet import build_crtp_log_request
 
 # Define connection parameters
 APP_IP = "192.168.43.42" # App IP address
@@ -39,8 +38,3 @@ def close_connection():
   """Close the UDP socket."""
   sock.close()
   print("UDP socket closed.")
-
-def send_log_request(log_variable: str):
-  """Sends a log request packet to the ESP-Drone."""
-  packet = build_crtp_log_request(log_variable)
-  send_packet(packet)
