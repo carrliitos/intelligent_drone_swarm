@@ -1,6 +1,16 @@
 import time
+import os
+from pathlib import Path
+
 from esp_drone_udp import UDPConnection
 from command import Command
+from utils import logger
+from utils import context
+
+directory = context.get_context(os.path.abspath(__file__))
+logger_file_name = Path(directory).stem
+logger_name = Path(__file__).stem
+main_logger = logger.setup_logger(logger_name, f"{directory}/logs/{logger_file_name}.log")
 
 # Define connection parameters
 APP_IP = "192.168.43.42"  # App IP address
@@ -27,12 +37,12 @@ def main():
       THRUST_DELAY
     )
 
-    print("Starting thrust control...")
+    main_logger.info("Starting thrust control...")
     drone_command.gradual_thrust_increase()  # Run thrust control
   except KeyboardInterrupt:
-    print("Operation interrupted by user.")
+    main_logger.debug("Operation interrupted by user.")
   except Exception as e:
-    print(f"An error occurred: {e}")
+    main_logger.error(f"An error occurred: {e}")
   finally:
     if connection:
       connection.close_connection()  # Close socket connection if open

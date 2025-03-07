@@ -1,4 +1,14 @@
 import time
+import os
+from pathlib import Path
+
+from utils import logger
+from utils import context
+
+directory = context.get_context(os.path.abspath(__file__))
+logger_file_name = Path(directory).stem
+logger_name = Path(__file__).stem
+logger = logger.setup_logger(logger_name, f"{directory}/logs/{logger_file_name}.log")
 
 class Command:
   def __init__(self, drone_connection, thrust_start, thrust_limit, thrust_step, thrust_delay):
@@ -12,28 +22,28 @@ class Command:
     """Gradually increases thrust to the specified limit."""
     thrust = self.thrust_start
     try:
-      print(f"Gradually increasing thrust to {self.thrust_limit}...")
+      logger.info(f"Gradually increasing thrust to {self.thrust_limit}...")
 
       # Gradually increase thrust
       while thrust <= self.thrust_limit:
         self.drone_connection.send_command(0.0, 0.0, 0.0, thrust)  # Sending only thrust commands
-        print(f"Thrust: {thrust}")
+        logger.info(f"Thrust: {thrust}")
         thrust += self.thrust_step
         time.sleep(self.thrust_delay)
 
       # Maintain max thrust for a short time
-      print("Holding max thrust...")
+      logger.info("Holding max thrust...")
       for _ in range(10):
         self.drone_connection.send_command(0.0, 0.0, 0.0, self.thrust_limit)
         time.sleep(self.thrust_delay)
 
       # Reduce thrust back to 0 gradually
-      print("Reducing thrust to 0...")
+      logger.info("Reducing thrust to 0...")
       while thrust >= 0:
         self.drone_connection.send_command(0.0, 0.0, 0.0, thrust)
-        print(f"Thrust: {thrust}")
+        logger.info(f"Thrust: {thrust}")
         thrust -= int((self.thrust_step / 2))
         time.sleep(self.thrust_delay)
 
     except KeyboardInterrupt:
-      print("Thrust control interrupted by user.")
+      logger.debug("Thrust control interrupted by user.")
