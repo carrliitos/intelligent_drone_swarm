@@ -22,7 +22,6 @@ def send_packet(data: bytes):
   """Send a UDP packet to the ESP-Drone."""
   try:
     sock.sendto(data, (APP_IP, DRONE_PORT))
-    print(f"Sent packet: {data.hex()}")
   except Exception as e:
     print(f"Failed to send packet: {e}")
 
