@@ -1,6 +1,8 @@
 import time
 import os
 from pathlib import Path
+import threading
+from threading import Thread
 
 from esp_drone_udp import UDPConnection
 from command import Command
@@ -38,7 +40,10 @@ def main():
     )
 
     main_logger.info("Starting thrust control...")
-    drone_command.gradual_thrust_increase()  # Run thrust control
+    drone_command_thread = threading.Thread(target=drone_command.gradual_thrust_increase)
+    drone_command_thread.start()
+    # Wait for the thread to complete before proceeding
+    drone_command_thread.join()
   except KeyboardInterrupt:
     main_logger.debug("Operation interrupted by user.")
   except Exception as e:
