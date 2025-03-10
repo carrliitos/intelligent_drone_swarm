@@ -12,7 +12,10 @@ from utils import context
 directory = context.get_context(os.path.abspath(__file__))
 logger_file_name = Path(directory).stem
 logger_name = Path(__file__).stem
-main_logger = logger.setup_logger(logger_name, f"{directory}/logs/{logger_file_name}.log")
+main_logger = logger.setup_logger(
+  logger_name, 
+  f"{directory}/logs/{logger_file_name}.log"
+)
 
 # Define connection parameters
 APP_IP = "192.168.43.42"  # App IP address

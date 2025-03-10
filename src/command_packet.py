@@ -24,7 +24,14 @@ class CommandPacket:
     thrust = max(min(thrust, 65535), 0)
 
     # Pack data into bytes (little-endian)
-    packet = struct.pack('<BfffH', PacketHeader.COMMANDER_HEADER, roll, pitch, yaw, thrust)
+    packet = struct.pack(
+      '<BfffH', 
+      PacketHeader.COMMANDER_HEADER, 
+      roll, 
+      pitch, 
+      yaw, 
+      thrust
+    )
 
     # Calculate CRC (simple sum of bytes & mask to 1 byte)
     crc = sum(packet) & 0xFF
