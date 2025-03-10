@@ -42,9 +42,14 @@ def main():
       THRUST_DELAY
     )
 
-    main_logger.info("Starting thrust control...")
-    drone_command_thread = threading.Thread(target=drone_command.gradual_thrust_increase)
+    main_logger.info("Testing hover...")
+    desired_altitude = 10  # Set your desired hover altitude in meters
+    drone_command_thread = threading.Thread(target=drone_command.hover, args=(desired_altitude,))
     drone_command_thread.start()
+
+    # main_logger.info("Starting thrust control...")
+    # drone_command_thread = threading.Thread(target=drone_command.gradual_thrust_increase)
+    # drone_command_thread.start()
     # Wait for the thread to complete before proceeding
     drone_command_thread.join()
   except KeyboardInterrupt:
