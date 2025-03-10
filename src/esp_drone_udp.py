@@ -34,11 +34,6 @@ class UDPConnection:
     self.sock.close()
     logger.info("UDP socket closed.")
 
-  def send_command(self, roll: float, pitch: float, yaw: float, thrust: int):
-    """Builds a command packet and sends it via UDP."""
-    packet = self.cmd_pckt.build(roll, pitch, yaw, thrust)
-    self.send_packet(packet)
-
   def send_packet(self, data: bytes):
     """Send a UDP packet to the ESP-Drone."""
     try:
