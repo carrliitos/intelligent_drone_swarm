@@ -53,41 +53,32 @@ class Command:
       logger.debug("Thrust control interrupted by user.")
 
   def hover(self, desired_altitude):
-    # Use PID with output limits
     pid = PIDController(
-      kp=5000.0, 
-      ki=500.0, 
-      kd=1000.0, 
+      kp=3000.0,
+      ki=300.0,
+      kd=800.0,
       setpoint=desired_altitude, 
       output_limits=(0, self.thrust_limit)
     )
     dt = 0.1  # Time step (100ms)
 
-    logger.info(f"Maintaining hover at {desired_altitude}m...")
+    logger.info(f"Arming attempt...")
+    for _ in range(10):
+      self.drone_connection.send_command(0.0, 0.0, 0.0, int(0.0))
 
-    thrust = self.thrust_start
+    logger.info(f"Attempting to hover at {desired_altitude}m...")
     try:
-      logger.info("Arming motors...")
-      while thrust <= 10000:
-        self.drone_connection.send_command(0.0, 0.0, 0.0, thrust)
-        logger.info(f"Thrust: {thrust}")
-        thrust += 500
-        time.sleep(dt)
-
-      logger.info("Hover attempt.")
-
-      for _ in range(100):
-        self.current_altitude = self.get_current_altitude()
+      while True:
+        self.current_altitude = self.get_current_altitude()  # Get sensor data
         thrust_adjustment = pid.update(self.current_altitude, dt)
 
-        # Limit thrust based on PID output and maximum allowed thrust
+        # Ensure thrust stays within limits
         self.current_thrust = max(min(thrust_adjustment, self.thrust_limit), 0)
         self.drone_connection.send_command(0.0, 0.0, 0.0, self.current_thrust)
-        logger.info(f"Altitude: {self.current_altitude:.2f}m, Thrust: {self.current_thrust}")
         time.sleep(dt)
-
     except KeyboardInterrupt:
-      logger.debug("Hover control interrupted by user.")
+      logger.debug("Hover interrupted by user. Landing safely.")
+      self.drone_connection.send_command(0.0, 0.0, 0.0, 0)  # Cut thrust on exit
 
   def get_current_altitude(self):
     # Simulate altitude for now (to be replaced with actual sensor data)
