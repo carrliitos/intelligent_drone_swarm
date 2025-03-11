@@ -1,5 +1,6 @@
 import time
 import os
+import math
 from pathlib import Path
 
 from pid_controller import PIDController
@@ -61,6 +62,7 @@ class Command:
       output_limits=(0, self.thrust_limit)
     )
     dt = 0.1  # Time step (100ms)
+    t = 0     # Time counter for oscillation
 
     logger.info(f"Arming attempt...")
     for _ in range(10):
@@ -74,8 +76,15 @@ class Command:
 
         # Ensure thrust stays within limits
         self.current_thrust = max(min(thrust_adjustment, self.thrust_limit), 0)
-        self.drone_connection.send_command(0.0, 0.0, 0.0, self.current_thrust)
+        # Oscillate roll, pitch, and yaw between -100 and 100 using sine waves
+        roll = 100 * math.sin(t)
+        pitch = 100 * math.sin(t + math.pi / 3)  # Phase shift for variation
+        yaw = 100 * math.sin(t + 2 * math.pi / 3)
+
+        self.drone_connection.send_command(roll, pitch, yaw, self.current_thrust)
+
         time.sleep(dt)
+        t += 0.1 # Time increment for oscillations
     except KeyboardInterrupt:
       logger.debug("Hover interrupted by user. Landing safely.")
       self.drone_connection.send_command(0.0, 0.0, 0.0, 0)  # Cut thrust on exit
