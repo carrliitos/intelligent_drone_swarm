@@ -81,6 +81,10 @@ class UDPConnection:
     try:
       while self._cf.state == 1:
         self._connected(self.link_uri)
+        logger.info("Thrust testing in...")
+        for i in range(5, 0, -1):
+          logger.info(i)
+          time.sleep(1)
         self._thrust_test()
 
         logger.info(f"We are connected ({self._cf.state}). CTRL+C to disconnect.")

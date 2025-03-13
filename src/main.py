@@ -21,14 +21,14 @@ def main():
   drone_udp = "udp://192.168.43.42:2390"
   drone = UDPConnection(drone_udp)
   command = Command(drone=drone, 
-                    thrust_start=10000, 
+                    thrust_start=0, 
                     thrust_limit=30000, 
-                    thrust_step=2000, 
+                    thrust_step=1000, 
                     thrust_delay=0.01)
 
   try:
     drone.connect()
-    time.sleep(100) # wait
+    time.sleep(5) # 5 second wait
     command.gradual_thrust_increase()
   except KeyboardInterrupt:
     logger.debug("Operation interrupted by user.")

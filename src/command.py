@@ -48,7 +48,9 @@ class Command:
 
       # Maintain max thrust for a short time
       logger.info("Holding max thrust...")
-      for _ in range(10):
+      hold_time = 5 # seconds
+      start_time = time.time()
+      while (time.time() - start_time) < hold_time:
         self.drone._cf.commander.send_setpoint(0.0, 0.0, 0.0, self.thrust_limit)
         time.sleep(self.thrust_delay)
 
