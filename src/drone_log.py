@@ -23,8 +23,8 @@ class DroneLogs:
     self.drone = drone
     self._cf = drone._cf
     self.log_config = None
-    # self.log_variables = ["crtp.rxRate", "crtp.txRate"]
     self.log_variables = ["pm.vbatMV"]
+    self._stop_event = threading.Event() # Threading event to signal logging stop
 
   def start_logging(self):
     """
@@ -42,8 +42,16 @@ class DroneLogs:
     time.sleep(2)
 
     # Start logging in a separate thread
+    self._stop_event.clear()
     log_thread = threading.Thread(target=self._log_drone_data, daemon=True)
     log_thread.start()
+
+  def stop_logging(self):
+    """
+    Stop logging.
+    """
+    self._stop_event.set()
+    logger.info("Stopping drone logging...")
 
   def _log_drone_data(self):
     """
@@ -60,8 +68,8 @@ class DroneLogs:
       log_config.start()
       logger.info("Started logging drone data.")
 
-      # Keep logging until interrupted
-      while self._cf.state != 0:
+      # Keep logging until the stop event is triggered
+      while self._cf.state != 0 and not self._stop_event.is_set():
         time.sleep(1)
 
     except Exception as e:

@@ -40,7 +40,8 @@ def main():
     sys.exit(1)
   finally:
     if drone:
-      logger.info("Closing connection to drone.")
+      logger.info("Stopping logging and closing connection to drone.")
+      drone_logger.stop_logging()
       drone._stop_timer()
       drone._cf.close_link()
 
