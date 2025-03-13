@@ -83,7 +83,7 @@ class UDPConnection:
         self._connected(self.link_uri)
         self._thrust_test()
 
-        logger.info("We are connected. CTRL+C to disconnect.")
+        logger.info(f"We are connected ({self._cf.state}). CTRL+C to disconnect.")
         return self
     except Exception as e:
       logger.error(f"Error during connection attempt: {e}")
