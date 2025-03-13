@@ -68,9 +68,9 @@ class DroneLogs:
     self.gyro_log_config = LogConfig(name="gyro_states", period_in_ms=500)
 
     try:
-      self.gyro_log_config.add_variable("gyro.stateX", "float")
-      self.gyro_log_config.add_variable("gyro.stateY", "float")
-      self.gyro_log_config.add_variable("gyro.stateZ", "float")
+      self.gyro_log_config.add_variable("gyro.x", "float")
+      self.gyro_log_config.add_variable("gyro.y", "float")
+      self.gyro_log_config.add_variable("gyro.z", "float")
 
       self._cf.log.add_config(self.gyro_log_config)
       self.gyro_log_config.data_received_cb.add_callback(self._log_callback)
