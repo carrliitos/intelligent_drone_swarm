@@ -25,6 +25,7 @@ class DroneLogs:
     self._stop_event = threading.Event()  # Threading event to signal logging stop
     self.battery_log_config = None
     self.gyro_log_config = None
+    self.control_log_config = None
 
   def start_logging(self):
     """
@@ -45,9 +46,11 @@ class DroneLogs:
     self._stop_event.clear()
     battery_logs = threading.Thread(target=self._battery_logs, daemon=True)
     gyro_states_logs = threading.Thread(target=self._gyro_states, daemon=True)
+    controller_logs = threading.Thread(target=self._control_states, daemon=True)
 
     battery_logs.start()
     gyro_states_logs.start()
+    controller_logs.start()
 
   def stop_logging(self):
     """
@@ -60,6 +63,36 @@ class DroneLogs:
       self.battery_log_config.stop()
     if self.gyro_log_config and self.gyro_log_config.valid:
       self.gyro_log_config.stop()
+    if self.control_log_config and self.control_log_config.valid:
+      self.control_log_config.stop()
+
+  def _control_states(self):
+    """
+    Log Control states information from the Crazyflie.
+    """
+    self.control_log_config = LogConfig(name="control_states", period_in_ms=500)
+
+    try:
+      self.control_log_config.add_variable("controller.cmd_roll", "float")
+      self.control_log_config.add_variable("controller.cmd_pitch", "float")
+      self.control_log_config.add_variable("controller.cmd_yaw", "float")
+      self.control_log_config.add_variable("controller.cmd_thrust", "float")
+
+      self._cf.log.add_config(self.control_log_config)
+      self.control_log_config.data_received_cb.add_callback(self._log_callback)
+      self.control_log_config.error_cb.add_callback(self._log_error_callback)
+      self.control_log_config.start()
+
+      # Keep logging until the stop event is triggered
+      while self._cf and self._cf.state != 0 and not self._stop_event.is_set():
+        time.sleep(1)
+
+    except Exception as e:
+      logger.error(f"Unexpected error: {e}")
+    finally:
+      if self.control_log_config and self.control_log_config.valid:
+        self.control_log_config.stop()
+        logger.info("Stopped Controller logging.")
 
   def _gyro_states(self):
     """
