@@ -100,4 +100,7 @@ class UDPConnection:
     for _ in range(100):
       self._cf.commander.send_setpoint(0, 0, 0, 15000)
       time.sleep(test_delay)
+
+    self._cf.commander.send_setpoint(0, 0, 0, 0)
+    time.sleep(2)
     logger.info("Thrust test complete.")

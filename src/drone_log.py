@@ -1,71 +1,84 @@
-import struct
 import time
 import os
+import threading
+import sys
 from pathlib import Path
+from cflib.crazyflie.log import LogConfig
+from utils import logger, context
+from esp_drone_udp import UDPConnection
 
-from utils import logger
-from utils import context
-
-# Logger setup
 directory = context.get_context(os.path.abspath(__file__))
-logger_file_name = Path(directory).stem
-logger_name = Path(__file__).stem
-logger = logger.setup_logger(logger_name, f"{directory}/logs/{logger_file_name}.log")
+logger_file_name = Path(__file__).stem
+logger_file = f"{directory}/logs/{logger_file_name}.log"
+logger = logger.setup_logger(logger_file_name, logger_file)
 
+class DroneLogs:
+  def __init__(self, drone: UDPConnection):
+    """
+    Handles logging real-time drone data.
 
-class DroneLogger:
-  """Handles logging of telemetry data from an ESP32 drone via UDP."""
-
-  CMD_START_LOGGING = 0x02
-  CMD_STOP_LOGGING = 0x03
-
-  def __init__(self, udp_connection, toc_handler):
-    self.udp_connection = udp_connection
-    self.toc_handler = toc_handler
-    self.log_config = {}
-
-  def add_variable(self, var_name, period_ms):
-    """Add a telemetry variable to the logging configuration."""
-    logger.inf(f"self.toc_handler.toc: {self.toc_handler.toc}")
-    if var_name in self.toc_handler.toc:
-      ident = self.toc_handler.toc[var_name]
-      self.log_config[var_name] = {'id': ident, 'period': period_ms}
-      logger.info(f"Added {var_name} to log configuration.")
-    else:
-      logger.warning(f"Variable {var_name} not found in TOC.")
+    Args:
+      drone (UDPConnection): The Crazyflie UDP connection instance.
+    """
+    self.drone = drone
+    self._cf = drone._cf
+    self.log_config = None
+    # self.log_variables = ["crtp.rxRate", "crtp.txRate"]
+    self.log_variables = ["pm.vbatMV"]
 
   def start_logging(self):
-    """Send a UDP command to start logging selected variables."""
-    logger.info("Starting logging...")
-    for var_name, config in self.log_config.items():
-      packet = struct.pack('<BIB', self.CMD_START_LOGGING, config['id'], config['period'])
-      self.udp_connection.send_packet(packet)
-      logger.debug(f"Sent start log command for {var_name} (ID {config['id']}, Period {config['period']}ms)")
+    """
+    Starts logging after ensuring the TOC is loaded.
+    """
+    if self._cf.state == 0:
+      logger.error("Drone is not connected. Cannot start logging. Exiting...")
+      sys.exit(0)
 
-  def stop_logging(self):
-    """Send a UDP command to stop all logging."""
-    logger.info("Stopping logging...")
-    packet = struct.pack('<B', self.CMD_STOP_LOGGING)
-    self.udp_connection.send_packet(packet)
-    logger.debug("Sent stop log command.")
+    logger.info("Waiting for TOC to be downloaded...")
+    while self._cf.log.toc is None or not self._cf.log.toc.toc:
+      time.sleep(0.1)
 
-  def process_log_packet(self, data):
-    """Process an incoming telemetry packet."""
-    if len(data) < 4:
-      logger.warning("Received invalid log packet (too short).")
-      return
+    logger.info("TOC downloaded. Starting logging...")
+    time.sleep(2)
 
-    timestamp = struct.unpack_from('<I', data, 0)[0]  # Extract timestamp
-    offset = 4
-    log_results = {}
+    # Start logging in a separate thread
+    log_thread = threading.Thread(target=self._log_drone_data, daemon=True)
+    log_thread.start()
 
-    for var_name, config in self.log_config.items():
-      try:
-        value = struct.unpack_from('<f', data, offset)[0]
-        offset += 4
-        log_results[var_name] = value
-      except struct.error:
-        logger.error(f"Failed to parse log variable {var_name} from packet.")
+  def _log_drone_data(self):
+    """
+    Log selected variables from the Crazyflie.
+    """
+    log_config = LogConfig(name='drone_logs', period_in_ms=500)
+    try:
+      for var in self.log_variables:
+        log_config.add_variable(var, 'float')
 
-    logger.info(f"{timestamp} - {log_results}")
+      self._cf.log.add_config(log_config)
+      log_config.data_received_cb.add_callback(self._log_callback)
+      log_config.error_cb.add_callback(self._log_error_callback)
+      log_config.start()
+      logger.info("Started logging drone data.")
 
+      # Keep logging until interrupted
+      while self._cf.state != 0:
+        time.sleep(1)
+
+    except Exception as e:
+      logger.error(f"Unexpected error: {e}")
+    finally:
+      if log_config.valid:
+        log_config.stop()
+        logger.info("Stopped logging drone data.")
+
+  def _log_callback(self, timestamp, data, logconf):
+    """
+    Callback for receiving log data.
+    """
+    logger.info(f"Timestamp: {timestamp}, Data: {data}")
+
+  def _log_error_callback(self, logconf, msg):
+    """
+    Callback for logging errors.
+    """
+    logger.error(f"Logging error: {msg}")
