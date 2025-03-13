@@ -31,6 +31,7 @@ def main():
   finally:
     if drone:
       logger.info("Closing connection to drone.")
+      drone._stop_timer()
       drone._cf.close_link()
 
 if __name__ == '__main__':
