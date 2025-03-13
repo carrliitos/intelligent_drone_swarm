@@ -6,6 +6,7 @@ from pathlib import Path
 from utils import logger
 from utils import context
 from esp_drone_udp import UDPConnection
+from command import Command
 
 import cflib
 
@@ -19,10 +20,16 @@ def main():
   cflib.crtp.init_drivers(enable_debug_driver=False)
   drone_udp = "udp://192.168.43.42:2390"
   drone = UDPConnection(drone_udp)
+  command = Command(drone=drone, 
+                    thrust_start=10000, 
+                    thrust_limit=30000, 
+                    thrust_step=2000, 
+                    thrust_delay=0.01)
 
   try:
-    while True:
-      drone.connect()
+    drone.connect()
+    time.sleep(100) # wait
+    command.gradual_thrust_increase()
   except KeyboardInterrupt:
     logger.debug("Operation interrupted by user.")
   except Exception as e:

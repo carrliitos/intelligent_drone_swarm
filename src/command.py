@@ -1,10 +1,9 @@
 import time
 import os
-import math
 from pathlib import Path
 
-from utils import logger
-from utils import context
+from utils import logger, context
+from esp_drone_udp import UDPConnection
 
 directory = context.get_context(os.path.abspath(__file__))
 logger_file_name = Path(directory).stem
@@ -12,59 +11,57 @@ logger_name = Path(__file__).stem
 logger = logger.setup_logger(logger_name, f"{directory}/logs/{logger_file_name}.log")
 
 class Command:
-  def __init__(self, drone_connection, thrust_start, thrust_limit, thrust_step, thrust_delay):
-    self.drone_connection = drone_connection
+  def __init__(self, 
+               drone: UDPConnection, 
+               thrust_start: int, 
+               thrust_limit: int, 
+               thrust_step: int, 
+               thrust_delay: float):
+    """
+    Handles gradual thrust commands for the drone.
+
+    :param drone: Instance of UDPConnection.
+    :param thrust_start: Initial thrust value.
+    :param thrust_limit: Maximum thrust value.
+    :param thrust_step: Step increment for thrust increase.
+    :param thrust_delay: Delay between thrust updates.
+    """
+    self.drone = drone
     self.thrust_start = thrust_start
     self.thrust_limit = thrust_limit
     self.thrust_step = thrust_step
     self.thrust_delay = thrust_delay
 
   def gradual_thrust_increase(self):
-    """Gradually increases thrust to the specified limit while oscillating roll, pitch, and yaw."""
+    """Gradually increases and decreases thrust for testing stability."""
     thrust = self.thrust_start
-    t = 0  # Time counter for oscillation
-    dt = self.thrust_delay  # Use thrust delay as time increment
 
     try:
-      logger.info(f"Gradually increasing thrust to {self.thrust_limit} with oscillations...")
+      logger.info(f"Gradually increasing thrust to {self.thrust_limit}...")
 
       # Gradually increase thrust
       while thrust <= self.thrust_limit:
-        roll = 50 * math.sin((5 * t))
-        pitch = 50 * math.sin((5 * t) + math.pi / 3)  # Phase shift for variation
-        yaw = 50 * math.sin((5 * t) + 2 * math.pi / 3)
-
-        self.drone_connection.send_command(roll, pitch, yaw, thrust)
-        logger.info(f"Thrust: {thrust}, Roll: {roll:.2f}, Pitch: {pitch:.2f}, Yaw: {yaw:.2f}")
-
+        self.drone._cf.commander.send_setpoint(0.0, 0.0, 0.0, thrust)
+        logger.info(f"Thrust: {thrust}")
         thrust += self.thrust_step
-        time.sleep(dt)
-        t += 0.2
+        time.sleep(self.thrust_delay)
 
       # Maintain max thrust for a short time
       logger.info("Holding max thrust...")
       for _ in range(10):
-        roll = 50 * math.sin(5 * t)
-        pitch = 50 * math.sin((5 * t) + math.pi / 3)
-        yaw = 50 * math.sin((5 * t) + 2 * math.pi / 3)
-
-        self.drone_connection.send_command(roll, pitch, yaw, self.thrust_limit)
-        time.sleep(dt)
-        t += 0.2
+        self.drone._cf.commander.send_setpoint(0.0, 0.0, 0.0, self.thrust_limit)
+        time.sleep(self.thrust_delay)
 
       # Reduce thrust back to 0 gradually
-      logger.info("Reducing thrust to 0 with oscillations...")
+      logger.info("Reducing thrust to 0...")
       while thrust >= 0:
-        roll = 50 * math.sin((5 * t))
-        pitch = 50 * math.sin((5 * t) + math.pi / 3)
-        yaw = 50 * math.sin((5 * t) + 2 * math.pi / 3)
-
-        self.drone_connection.send_command(roll, pitch, yaw, thrust)
-        logger.info(f"Thrust: {thrust}, Roll: {roll:.2f}, Pitch: {pitch:.2f}, Yaw: {yaw:.2f}")
-
-        thrust -= int((self.thrust_step / 2))
-        time.sleep(dt)
-        t += 0.2
+        self.drone._cf.commander.send_setpoint(0.0, 0.0, 0.0, thrust)
+        logger.info(f"Thrust: {thrust}")
+        thrust -= int(self.thrust_step / 2)
+        time.sleep(self.thrust_delay)
 
     except KeyboardInterrupt:
       logger.debug("Thrust control interrupted by user.")
+    finally:
+      self.drone._cf.commander.send_setpoint(0.0, 0.0, 0.0, 0)  # Ensure drone stops safely
+      logger.info("Thrust set to 0 for safety.")
