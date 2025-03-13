@@ -24,7 +24,7 @@ class DroneLogs:
     self._cf = drone._cf
     self._stop_event = threading.Event()  # Threading event to signal logging stop
     self.battery_log_config = None
-    self.kalman_log_config = None
+    self.gyro_log_config = None
 
   def start_logging(self):
     """
@@ -44,10 +44,10 @@ class DroneLogs:
     # Start logging in separate threads
     self._stop_event.clear()
     battery_logs = threading.Thread(target=self._battery_logs, daemon=True)
-    kalman_states_logs = threading.Thread(target=self._kalman_states, daemon=True)
+    gyro_states_logs = threading.Thread(target=self._gyro_states, daemon=True)
 
     battery_logs.start()
-    kalman_states_logs.start()
+    gyro_states_logs.start()
 
   def stop_logging(self):
     """
@@ -58,24 +58,24 @@ class DroneLogs:
 
     if self.battery_log_config and self.battery_log_config.valid:
       self.battery_log_config.stop()
-    if self.kalman_log_config and self.kalman_log_config.valid:
-      self.kalman_log_config.stop()
+    if self.gyro_log_config and self.gyro_log_config.valid:
+      self.gyro_log_config.stop()
 
-  def _kalman_states(self):
+  def _gyro_states(self):
     """
-    Log Kalman states information from the Crazyflie.
+    Log Gyro states information from the Crazyflie.
     """
-    self.kalman_log_config = LogConfig(name="kalman_states", period_in_ms=500)
+    self.gyro_log_config = LogConfig(name="gyro_states", period_in_ms=500)
 
     try:
-      self.kalman_log_config.add_variable("kalman.stateX", "float")
-      self.kalman_log_config.add_variable("kalman.stateY", "float")
-      self.kalman_log_config.add_variable("kalman.stateZ", "float")
+      self.gyro_log_config.add_variable("gyro.stateX", "float")
+      self.gyro_log_config.add_variable("gyro.stateY", "float")
+      self.gyro_log_config.add_variable("gyro.stateZ", "float")
 
-      self._cf.log.add_config(self.kalman_log_config)
-      self.kalman_log_config.data_received_cb.add_callback(self._log_callback)
-      self.kalman_log_config.error_cb.add_callback(self._log_error_callback)
-      self.kalman_log_config.start()
+      self._cf.log.add_config(self.gyro_log_config)
+      self.gyro_log_config.data_received_cb.add_callback(self._log_callback)
+      self.gyro_log_config.error_cb.add_callback(self._log_error_callback)
+      self.gyro_log_config.start()
 
       # Keep logging until the stop event is triggered
       while self._cf and self._cf.state != 0 and not self._stop_event.is_set():
@@ -84,9 +84,9 @@ class DroneLogs:
     except Exception as e:
       logger.error(f"Unexpected error: {e}")
     finally:
-      if self.kalman_log_config and self.kalman_log_config.valid:
-        self.kalman_log_config.stop()
-        logger.info("Stopped Kalman logging.")
+      if self.gyro_log_config and self.gyro_log_config.valid:
+        self.gyro_log_config.stop()
+        logger.info("Stopped Gyro logging.")
 
   def _battery_logs(self):
     """
