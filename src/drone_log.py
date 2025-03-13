@@ -23,7 +23,6 @@ class DroneLogs:
     self.drone = drone
     self._cf = drone._cf
     self.log_config = None
-    self.log_variables = ["pm.vbatMV"]
     self._stop_event = threading.Event() # Threading event to signal logging stop
 
   def start_logging(self):
@@ -57,10 +56,12 @@ class DroneLogs:
     """
     Log selected variables from the Crazyflie.
     """
-    log_config = LogConfig(name='drone_logs', period_in_ms=500)
+    log_config = LogConfig(name="drone_battery", period_in_ms=500)
+
     try:
-      for var in self.log_variables:
-        log_config.add_variable(var, 'float')
+      log_config.add_variable("pm.vbatMV", "uint16_t")
+      log_config.add_variable("pm.chargeCurrent", "float")
+      log_config.add_variable("pm.batteryLevel", "uint8_t")
 
       self._cf.log.add_config(log_config)
       log_config.data_received_cb.add_callback(self._log_callback)
