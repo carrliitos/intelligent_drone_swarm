@@ -1,81 +1,103 @@
-import socket
+import os
+import sys
 import threading
 import time
-import struct
+from threading import Thread
 from pathlib import Path
 
-from command_packet import CommandPacket
-from utils import logger
-from utils import context
+from utils import logger, context
 
-directory = context.get_context(__file__)
+import cflib
+from cflib.crazyflie import Crazyflie
+
+directory = context.get_context(os.path.abspath(__file__))
 logger_name = Path(__file__).stem
 logger = logger.setup_logger(logger_name, f"{directory}/logs/{logger_name}.log")
 
 class UDPConnection:
-  CMD_REQUEST_TOC = 0x10  # Command for requesting TOC from ESP32
-  CMD_KEEP_ALIVE = 0x20   # Command for keeping the connection alive
-
-  def __init__(self, app_ip, app_port, drone_port):
-    self.app_ip = app_ip
-    self.app_port = app_port
-    self.drone_port = drone_port
+  def __init__(self, link_uri):
+    self.link_uri = link_uri
+    self._cf = Crazyflie(rw_cache='./cache')
     self.timer = None
-    self.cmd_pckt = CommandPacket()
-    self.toc_received = threading.Event()  # Event to signal TOC readiness
 
-  def open_connection(self):
-    """Create and bind the UDP socket."""
-    self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    self.sock.bind(('', self.app_port))
-    logger.info(f"UDP socket created and bound to {self.app_ip}:{self.app_port}")
-    
-    # Start idling process to keep connection alive
-    threading.Thread(target=self._idle, daemon=True).start()
+    # Register connection callbacks
+    self._cf.connected.add_callback(self._connected)
+    self._cf.disconnected.add_callback(self._disconnected)
+    self._cf.connection_failed.add_callback(self._connection_failed)
+    self._cf.connection_lost.add_callback(self._connection_lost)
 
-    # Request TOC from drone
-    self.request_toc()
+    # Open link to Crazyflie
+    self._cf.open_link(link_uri)
 
-    return self
+    logger.info(f"Connecting to {self.link_uri}")
 
-  def close_connection(self):
-    """Close the UDP socket."""
-    self.sock.close()
-    logger.info("UDP socket closed.")
+  def _connected(self, link_uri):
+    """
+    Callback triggered when the Crazyflie successfully connects.
+    """
 
-  def send_packet(self, data: bytes):
-    """Send a UDP packet to the ESP-Drone."""
-    try:
-      self.sock.sendto(data, (self.app_ip, self.drone_port))
-    except Exception as e:
-      logger.error(f"Failed to send packet: {e}")
+    # Start the idle loop.
+    Thread(target=self._idle, daemon=True).start()
 
-  def receive_packet(self, buffer_size=1024):
-    """Receive a UDP packet from the ESP-Drone."""
-    try:
-      data, addr = self.sock.recvfrom(buffer_size)
-      logger.info(f"Received {len(data)} bytes from {addr}: {data.hex()}")
-      return data
-    except socket.timeout:
-      logger.warning("Timeout while waiting for packet.")
-      return None
-    except Exception as e:
-      logger.error(f"Failed to receive packet: {e}")
-      return None
+  def _disconnected(self, link_uri):
+    """
+    Callback triggered when the Crazyflie disconnects.
+    """
+    logger.info(f"Disconnected from {link_uri}")
 
-  def request_toc(self):
-    """Request the TOC (Table of Contents) from the drone."""
-    logger.info("Requesting TOC from drone...")
-    self.send_packet(struct.pack("<B", self.CMD_REQUEST_TOC))
+  def _connection_failed(self, link_uri, msg):
+    """
+    Callback triggered when the initial connection attempt fails.
+    """
+    logger.error(f"Connection to {link_uri} failed: {msg}")
 
-    # Wait for TOC to be received before proceeding
-    if not self.toc_received.wait(timeout=5):  
-      logger.error("TOC download timed out!")
-      raise TimeoutError("Failed to receive TOC from drone.")
+  def _connection_lost(self, link_uri, msg):
+    """
+    Callback triggered when the connection is lost after being established.
+    """
+    logger.error(f"Connection to {link_uri} lost: {msg}")
+
+  def _start_timer(self):
+    """Starts a recurring timer to send idle commands to the drone."""
+    self._stop_timer()  # Ensure no duplicate timers
+    self.timer = threading.Timer(0.05, self._idle)
+    self.timer.start()
+
+  def _stop_timer(self):
+    """Stops the active timer if it exists."""
+    if self.timer:
+      self.timer.cancel()
+      self.timer = None
 
   def _idle(self):
-    """Sends a zero-thrust command to keep the drone connection alive."""
-    packet = self.cmd_pckt.build(0.0, 0.0, 0.0, int(0.0))
-    self.send_packet(packet)
-    time.sleep(0.025)  # Wait 25ms before sending next idle command
-    self._idle()  # Recursively call itself
+    """Sends a zero-setpoint command to keep the Crazyflie active."""
+    self._cf.commander.send_setpoint(0, 0, 0, 0)
+    self._start_timer()  # Restart for continuous updates
+
+  def connect(self):
+    """
+    Establishes a connection to the Crazyflie, ensuring the connection is active.
+    """
+    try:
+      while self._cf.state == 1:
+        self._connected(self.link_uri)
+        logger.info("Thrust testing in...")
+        for i in range(5, 0, -1):
+          logger.info(i)
+          time.sleep(1)
+        self._thrust_test()
+
+        logger.info(f"We are connected ({self._cf.state}). CTRL+C to disconnect.")
+        return self
+    except Exception as e:
+      logger.error(f"Error during connection attempt: {e}")
+      sys.exit(1)
+
+  def _thrust_test(self):
+    logger.info("Thrust test...")
+
+    test_delay = 0.01
+    for _ in range(100):
+      self._cf.commander.send_setpoint(0, 0, 0, 15000)
+      time.sleep(test_delay)
+    logger.info("Thrust test complete.")
