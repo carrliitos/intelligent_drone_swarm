@@ -42,7 +42,6 @@ class Command:
       # Gradually increase thrust
       while thrust <= self.thrust_limit:
         self.drone._cf.commander.send_setpoint(0.0, 0.0, 0.0, thrust)
-        logger.info(f"Thrust: {thrust}")
         thrust += self.thrust_step
         time.sleep(self.thrust_delay)
 
@@ -58,7 +57,6 @@ class Command:
       logger.info("Reducing thrust to 0...")
       while thrust >= 0:
         self.drone._cf.commander.send_setpoint(0.0, 0.0, 0.0, thrust)
-        logger.info(f"Thrust: {thrust}")
         thrust -= int(self.thrust_step / 2)
         time.sleep(self.thrust_delay)
 
