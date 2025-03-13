@@ -22,14 +22,15 @@ class DroneLogs:
     """
     self.drone = drone
     self._cf = drone._cf
-    self.log_config = None
-    self._stop_event = threading.Event() # Threading event to signal logging stop
+    self._stop_event = threading.Event()  # Threading event to signal logging stop
+    self.battery_log_config = None
+    self.kalman_log_config = None
 
   def start_logging(self):
     """
     Starts logging after ensuring the TOC is loaded.
     """
-    if self._cf.state == 0:
+    if not self._cf or self._cf.state == 0:
       logger.error("Drone is not connected. Cannot start logging. Exiting...")
       sys.exit(0)
 
@@ -40,10 +41,13 @@ class DroneLogs:
     logger.info("TOC downloaded. Starting logging...")
     time.sleep(2)
 
-    # Start logging in a separate thread
+    # Start logging in separate threads
     self._stop_event.clear()
-    log_thread = threading.Thread(target=self._log_drone_data, daemon=True)
-    log_thread.start()
+    battery_logs = threading.Thread(target=self._battery_logs, daemon=True)
+    kalman_states_logs = threading.Thread(target=self._kalman_states, daemon=True)
+
+    battery_logs.start()
+    kalman_states_logs.start()
 
   def stop_logging(self):
     """
@@ -52,33 +56,64 @@ class DroneLogs:
     self._stop_event.set()
     logger.info("Stopping drone logging...")
 
-  def _log_drone_data(self):
+    if self.battery_log_config and self.battery_log_config.valid:
+      self.battery_log_config.stop()
+    if self.kalman_log_config and self.kalman_log_config.valid:
+      self.kalman_log_config.stop()
+
+  def _kalman_states(self):
     """
-    Log selected variables from the Crazyflie.
+    Log Kalman states information from the Crazyflie.
     """
-    log_config = LogConfig(name="drone_battery", period_in_ms=500)
+    self.kalman_log_config = LogConfig(name="kalman_states", period_in_ms=500)
 
     try:
-      log_config.add_variable("pm.vbatMV", "uint16_t")
-      log_config.add_variable("pm.chargeCurrent", "float")
-      log_config.add_variable("pm.batteryLevel", "uint8_t")
+      self.kalman_log_config.add_variable("kalman.stateX", "float")
+      self.kalman_log_config.add_variable("kalman.stateY", "float")
+      self.kalman_log_config.add_variable("kalman.stateZ", "float")
 
-      self._cf.log.add_config(log_config)
-      log_config.data_received_cb.add_callback(self._log_callback)
-      log_config.error_cb.add_callback(self._log_error_callback)
-      log_config.start()
-      logger.info("Started logging drone data.")
+      self._cf.log.add_config(self.kalman_log_config)
+      self.kalman_log_config.data_received_cb.add_callback(self._log_callback)
+      self.kalman_log_config.error_cb.add_callback(self._log_error_callback)
+      self.kalman_log_config.start()
 
       # Keep logging until the stop event is triggered
-      while self._cf.state != 0 and not self._stop_event.is_set():
+      while self._cf and self._cf.state != 0 and not self._stop_event.is_set():
         time.sleep(1)
 
     except Exception as e:
       logger.error(f"Unexpected error: {e}")
     finally:
-      if log_config.valid:
-        log_config.stop()
-        logger.info("Stopped logging drone data.")
+      if self.kalman_log_config and self.kalman_log_config.valid:
+        self.kalman_log_config.stop()
+        logger.info("Stopped Kalman logging.")
+
+  def _battery_logs(self):
+    """
+    Log battery information from the Crazyflie.
+    """
+    self.battery_log_config = LogConfig(name="drone_battery", period_in_ms=500)
+
+    try:
+      self.battery_log_config.add_variable("pm.vbatMV", "uint16_t")
+      self.battery_log_config.add_variable("pm.chargeCurrent", "float")
+      self.battery_log_config.add_variable("pm.batteryLevel", "uint8_t")
+
+      self._cf.log.add_config(self.battery_log_config)
+      self.battery_log_config.data_received_cb.add_callback(self._log_callback)
+      self.battery_log_config.error_cb.add_callback(self._log_error_callback)
+      self.battery_log_config.start()
+
+      # Keep logging until the stop event is triggered
+      while self._cf and self._cf.state != 0 and not self._stop_event.is_set():
+        time.sleep(1)
+
+    except Exception as e:
+      logger.error(f"Unexpected error: {e}")
+    finally:
+      if self.battery_log_config and self.battery_log_config.valid:
+        self.battery_log_config.stop()
+        logger.info("Stopped battery logging.")
 
   def _log_callback(self, timestamp, data, logconf):
     """
