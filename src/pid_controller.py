@@ -1,3 +1,26 @@
+# pid_controller.py
+# -*- coding: utf-8-*-
+# @Author: Benzon Carlitos Salazar (carrliitos)
+# @Email:  salazarbc24@uww.edu
+# @Date:   2024-03-14
+#
+# @Last update:   2024-03-14 04:23 PM
+#
+# This module implements a PID (Proportional-Integral-Derivative) controller.
+# A PID controller is a feedback control mechanism commonly used in control 
+# systems to maintain a desired setpoint by continuously adjusting an output 
+# based on the error between the setpoint and the measured value.
+#
+# The PID controller in this implementation:
+# - Computes a control output based on proportional (P), integral (I), 
+#   and derivative (D) terms.
+# - Uses an anti-windup mechanism to prevent excessive integral accumulation.
+# - Computes the derivative term based on the measured value rather than 
+#   error to improve stability.
+# - Clamps the output within specified limits to ensure it stays within 
+#   the allowable range.
+# - Supports configurable sample time for updates.
+
 import time
 
 class PIDController:
