@@ -36,6 +36,8 @@ class DroneLogs:
     self.gyro_x = 0.0
     self.gyro_y = 0.0
     self.gyro_z = 0.0
+    self.pm_vbatMV = 0
+    self.pm_batteryLevel = 0
 
   def start_logging(self):
     """
@@ -89,7 +91,7 @@ class DroneLogs:
       self.control_log_config.add_variable("controller.cmd_thrust", "float")
 
       self._cf.log.add_config(self.control_log_config)
-      self.control_log_config.data_received_cb.add_callback(self._log_callback)
+      self.control_log_config.data_received_cb.add_callback(self._log_callback__controller)
       self.control_log_config.error_cb.add_callback(self._log_error_callback)
       self.control_log_config.start()
 
@@ -116,7 +118,7 @@ class DroneLogs:
       self.gyro_log_config.add_variable("gyro.z", "float")
 
       self._cf.log.add_config(self.gyro_log_config)
-      self.gyro_log_config.data_received_cb.add_callback(self._log_callback)
+      self.gyro_log_config.data_received_cb.add_callback(self._log_callback__gyro)
       self.gyro_log_config.error_cb.add_callback(self._log_error_callback)
       self.gyro_log_config.start()
 
@@ -139,11 +141,10 @@ class DroneLogs:
 
     try:
       self.battery_log_config.add_variable("pm.vbatMV", "uint16_t")
-      self.battery_log_config.add_variable("pm.chargeCurrent", "float")
       self.battery_log_config.add_variable("pm.batteryLevel", "uint8_t")
 
       self._cf.log.add_config(self.battery_log_config)
-      self.battery_log_config.data_received_cb.add_callback(self._log_callback)
+      self.battery_log_config.data_received_cb.add_callback(self._log_callback__power)
       self.battery_log_config.error_cb.add_callback(self._log_error_callback)
       self.battery_log_config.start()
 
@@ -158,25 +159,30 @@ class DroneLogs:
         self.battery_log_config.stop()
         logger.info("Stopped battery logging.")
 
-  def _log_callback(self, timestamp, data, logconf):
-    """
-    Callback for receiving log data.
-    """
+  def _log_callback__gyro(self, timestamp, data, logconf):
+    """ Callback for gyro data. """
     with self.lock:
-      if "controller.cmd_thrust" in data:
-        self.cmd_thrust = data["controller.cmd_thrust"]
-      if "controller.cmd_roll" in data:
-        self.cmd_thrust = data["controller.cmd_roll"]
-      if "controller.cmd_pitch" in data:
-        self.cmd_thrust = data["controller.cmd_pitch"]
-      if "controller.cmd_yaw" in data:
-        self.cmd_thrust = data["controller.cmd_yaw"]
-      if "gyro.x" in data:
-        self.gyro_x = data["gyro.x"]
-      if "gyro.y" in data:
-        self.gyro_y = data["gyro.y"]
-      if "gyro.z" in data:
-        self.gyro_z = data["gyro.z"]
+      self.gyro_x = data["gyro.x"]
+      self.gyro_y = data["gyro.y"]
+      self.gyro_z = data["gyro.z"]
+
+    logger.info(f"Timestamp: {timestamp}, Data: {data}")
+
+  def _log_callback__controller(self, timestamp, data, logconf):
+    """ Callback for controller data. """
+    with self.lock:
+      self.cmd_thrust = data["controller.cmd_thrust"]
+      self.cmd_roll = data["controller.cmd_roll"]
+      self.cmd_pitch = data["controller.cmd_pitch"]
+      self.cmd_yaw = data["controller.cmd_yaw"]
+
+    logger.info(f"Timestamp: {timestamp}, Data: {data}")
+
+  def _log_callback__power(self, timestamp, data, logconf):
+    """ Callback for power management data. """
+    with self.lock:
+      self.pm_vbatMV = data["pm.vbatMV"]
+      self.pm_batteryLevel = data["pm.batteryLevel"]
 
     logger.info(f"Timestamp: {timestamp}, Data: {data}")
 
