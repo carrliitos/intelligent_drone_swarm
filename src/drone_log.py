@@ -27,6 +27,16 @@ class DroneLogs:
     self.gyro_log_config = None
     self.control_log_config = None
 
+    self.lock = threading.Lock()
+
+    self.cmd_thrust = 0.0
+    self.cmd_roll = 0.0
+    self.cmd_pitch = 0.0
+    self.cmd_yaw = 0.0
+    self.gyro_x = 0.0
+    self.gyro_y = 0.0
+    self.gyro_z = 0.0
+
   def start_logging(self):
     """
     Starts logging after ensuring the TOC is loaded.
@@ -152,6 +162,22 @@ class DroneLogs:
     """
     Callback for receiving log data.
     """
+    with self.lock:
+      if "controller.cmd_thrust" in data:
+        self.cmd_thrust = data["controller.cmd_thrust"]
+      if "controller.cmd_roll" in data:
+        self.cmd_thrust = data["controller.cmd_roll"]
+      if "controller.cmd_pitch" in data:
+        self.cmd_thrust = data["controller.cmd_pitch"]
+      if "controller.cmd_yaw" in data:
+        self.cmd_thrust = data["controller.cmd_yaw"]
+      if "gyro.x" in data:
+        self.gyro_x = data["gyro.x"]
+      if "gyro.y" in data:
+        self.gyro_y = data["gyro.y"]
+      if "gyro.z" in data:
+        self.gyro_z = data["gyro.z"]
+
     logger.info(f"Timestamp: {timestamp}, Data: {data}")
 
   def _log_error_callback(self, logconf, msg):
@@ -159,3 +185,31 @@ class DroneLogs:
     Callback for logging errors.
     """
     logger.error(f"Logging error: {msg}")
+
+  def get_thrust(self):
+    with self.lock:
+      return self.cmd_thrust
+
+  def get_roll(self):
+    with self.lock:
+      return self.cmd_roll
+
+  def get_pitch(self):
+    with self.lock:
+      return self.cmd_pitch
+
+  def get_yaw(self):
+    with self.lock:
+      return self.cmd_yaw
+
+  def get_gyro_x(self):
+    with self.lock:
+      return self.gyro_x
+
+  def get_gyro_y(self):
+    with self.lock:
+      return self.gyro_y
+
+  def get_gyro_z(self):
+    with self.lock:
+      return self.gyro_z
