@@ -1,0 +1,81 @@
+<!--    
+    Starter Web Application for Drone Connection
+    HOW TO RUN WEB APPLICATION:
+        1.CHANGE CODE PATHS
+            - $script_path (line 6 index.php)
+            - $venv_path (line 7 index.php)
+
+        2.Install PHP on system if not installed
+            -macOs:   `brew install php`
+            -linux:   `sudo apt install php`
+            -Windows: https://windows.php.net/download/
+    
+        3. Navigate to WebApp directory inside of esp32_drone_swarm
+            - start server: php -S localhost:8000
+            - open from browser: http://localhost:8000/index.html
+-->
+    
+<!DOCTYPE html>
+    <html>
+     <head>
+         <title>ESP32 Web Application</title>
+         <link rel="stylesheet" href="styles.css">
+     </head>
+     <body>
+         <header>
+             <h2>ESP32 Web Application</h2>
+             <nav>
+                 <ul>
+                     <li><a href="#connection">Connection Status</a></li>
+                     <li><a href="#logging">Logging Information</a></li>
+                 </ul>
+             </nav>
+         </header>
+         <main>
+             <section id="connection">
+                 <h3>Current Drone Connection Status</h3>
+                 <button id="startScript">Test</button>
+                 <button id="stopScript">Stop</button>
+                 <pre id = "output"></pre>
+                 <p>Future Development of Drone Status Goes Here</p>
+             </section>
+     
+             <section id="logging">
+                 <h3>Logging Information</h3>
+                 <pre id="logOutput">No logs available yet.</pre>
+             </section>
+         </main>
+         <footer>
+             <p>Capstone Title Goes Here. 2025.</p>
+         </footer>
+     
+         <!-- JavaScript used to display logging in real time, needs to be better eventually as the logging does not appear
+            untill after the script terminates-->
+         <script>
+        document.getElementById("startScript").addEventListener("click", function() {
+            fetch("index.php", {
+                method: "POST",
+                headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                body: "start_script=1"
+         })
+        .then(response => response.text())
+        .then(text => {
+            document.getElementById("output").textContent = text; // Display output
+    });
+});
+
+        document.getElementById("stopScript").addEventListener("click", function() {
+            fetch("index.php", {
+                method: "POST",
+                headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                body: "stop_script=1"
+        })
+        .then(response => response.text())
+        .then(text => {
+            document.getElementById("output").textContent = text; // Display output
+    });
+});
+</script>
+     </body>
+     </html>
+     

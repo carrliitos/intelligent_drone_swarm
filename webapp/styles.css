@@ -1,0 +1,22 @@
+body {
+    font-family: 'Times New Roman', Times, serif;
+    background: #ebe9e9;
+    color: #333;
+    text-align: left;
+    padding: 20px;
+}
+
+header {
+    background: grey;
+    color: white;
+    padding: 10px;
+}
+
+nav a {
+    color: white;
+}
+
+section {
+    min-height: 50vh;
+    padding: 50px;
+}
