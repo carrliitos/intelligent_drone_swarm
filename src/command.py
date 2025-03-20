@@ -38,9 +38,9 @@ class Command:
     self.thrust_delay = thrust_delay
 
     # Rate-based PID controls
-    self.roll_rate_pid = PIDController(kp=1.0, ki=0.1, kd=0.05, output_limits=(-30, 30))
-    self.pitch_rate_pid = PIDController(kp=1.0, ki=0.1, kd=0.05, output_limits=(-30, 30))
-    self.yaw_rate_pid = PIDController(kp=1.0, ki=0.1, kd=0.05, output_limits=(-100, 100))
+    self.roll_rate_pid = PIDController(kp=0.0, ki=0.0, kd=0.0, output_limits=(-30, 30))
+    self.pitch_rate_pid = PIDController(kp=0.0, ki=0.0, kd=0.0, output_limits=(-30, 30))
+    self.yaw_rate_pid = PIDController(kp=0.0, ki=0.0, kd=0.0, output_limits=(-100, 100))
 
   def gradual_thrust_increase(self):
     """Gradually increases and decreases thrust for testing stability."""
