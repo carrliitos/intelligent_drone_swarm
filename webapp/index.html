@@ -1,22 +1,14 @@
 <!--    
-    Starter Web Application for Drone Connection
-    HOW TO RUN WEB APPLICATION:
-        1.CHANGE CODE PATHS
-            - $script_path (line 6 index.php)
-            - $venv_path (line 7 index.php)
-
-        2.Install PHP on system if not installed
-            -macOs:   `brew install php`
-            -linux:   `sudo apt install php`
-            -Windows: https://windows.php.net/download/
-    
-        3. Navigate to WebApp directory inside of esp32_drone_swarm
-            - start server: php -S localhost:8000
-            - open from browser: http://localhost:8000/index.html
+How to Run the Drone Web Application
+    1. Update file paths in `index.php` (lines 6-7) to match your local paths.
+    2. Open a terminal and navigate to the web app directory.
+    3. Start the local server by running the appropriate PHP command:
+        - install php using pip if not already installed on system
+        - `php -S localhost:8000`
+    4. Open a web browser and go to `http://localhost:8000/index.html` to access the application.
 -->
-    
-<!DOCTYPE html>
-    <html>
+     <!DOCTYPE html>
+     <html>
      <head>
          <title>ESP32 Web Application</title>
          <link rel="stylesheet" href="styles.css">
@@ -60,7 +52,7 @@
          })
         .then(response => response.text())
         .then(text => {
-            document.getElementById("output").textContent = text; // Display output
+            document.getElementById("output").textContent = text;
     });
 });
 
@@ -72,7 +64,7 @@
         })
         .then(response => response.text())
         .then(text => {
-            document.getElementById("output").textContent = text; // Display output
+            document.getElementById("output").textContent = text;
     });
 });
 </script>
