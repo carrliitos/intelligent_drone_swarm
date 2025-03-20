@@ -38,6 +38,10 @@ class DroneLogs:
     self.gyro_z = 0.0
     self.pm_vbatMV = 0
     self.pm_batteryLevel = 0
+    self.motor_m1 = 0
+    self.motor_m2 = 0
+    self.motor_m3 = 0
+    self.motor_m4 = 0
 
   def start_logging(self):
     """
@@ -59,10 +63,12 @@ class DroneLogs:
     battery_logs = threading.Thread(target=self._battery_logs, daemon=True)
     gyro_states_logs = threading.Thread(target=self._gyro_states, daemon=True)
     controller_logs = threading.Thread(target=self._control_states, daemon=True)
+    motor_logs = threading.Thread(target=self._motor_states, daemon=True)
 
     battery_logs.start()
     gyro_states_logs.start()
     controller_logs.start()
+    motor_logs.start()
 
   def stop_logging(self):
     """
@@ -77,6 +83,34 @@ class DroneLogs:
       self.gyro_log_config.stop()
     if self.control_log_config and self.control_log_config.valid:
       self.control_log_config.stop()
+
+  def _motor_states(self):
+    """
+    Log Motor states information from the Crazyflie.
+    """
+    self.motor_log_config = LogConfig(name="motor_states", period_in_ms=500)
+
+    try:
+      self.motor_log_config.add_variable("motor.m1", "uint32_t")
+      self.motor_log_config.add_variable("motor.m2", "uint32_t")
+      self.motor_log_config.add_variable("motor.m3", "uint32_t")
+      self.motor_log_config.add_variable("motor.m4", "uint32_t")
+
+      self._cf.log.add_config(self.motor_log_config)
+      self.motor_log_config.data_received_cb.add_callback(self._log_callback__motor)
+      self.motor_log_config.error_cb.add_callback(self._log_error_callback)
+      self.motor_log_config.start()
+
+      # Keep logging until the stop event is triggered
+      while self._cf and self._cf.state != 0 and not self._stop_event.is_set():
+        time.sleep(1)
+
+    except Exception as e:
+      logger.error(f"Unexpected error: {e}")
+    finally:
+      if self.motor_log_config and self.motor_log_config.valid:
+        self.motor_log_config.stop()
+        logger.info("Stopped Motor logging.")
 
   def _control_states(self):
     """
@@ -158,6 +192,16 @@ class DroneLogs:
       if self.battery_log_config and self.battery_log_config.valid:
         self.battery_log_config.stop()
         logger.info("Stopped battery logging.")
+
+  def _log_callback__motor(self, timestamp, data, logconf):
+    """ Callback for motor data. """
+    with self.lock:
+      self.motor_m1 = data["motor.m1"]
+      self.motor_m2 = data["motor.m2"]
+      self.motor_m3 = data["motor.m3"]
+      self.motor_m4 = data["motor.m4"]
+
+    logger.info(f"Timestamp: {timestamp}, Data: {data}")
 
   def _log_callback__gyro(self, timestamp, data, logconf):
     """ Callback for gyro data. """
