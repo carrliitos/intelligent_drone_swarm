@@ -1,5 +1,6 @@
 import time
 import os
+import pandas as pd
 from pathlib import Path
 
 from utils import logger, context
@@ -38,9 +39,24 @@ class Command:
     self.thrust_delay = thrust_delay
 
     # Rate-based PID controls
-    self.roll_rate_pid = PIDController(kp=0.0, ki=0.0, kd=0.0, output_limits=(-30, 30))
-    self.pitch_rate_pid = PIDController(kp=0.0, ki=0.0, kd=0.0, output_limits=(-30, 30))
-    self.yaw_rate_pid = PIDController(kp=0.0, ki=0.0, kd=0.0, output_limits=(-100, 100))
+    pid_vals = self._load_initial_pid()
+    self.roll_rate_pid = PIDController(*pid_vals["roll"], output_limits=(-30, 30))
+    self.pitch_rate_pid = PIDController(*pid_vals["pitch"], output_limits=(-30, 30))
+    self.yaw_rate_pid = PIDController(*pid_vals["yaw"], output_limits=(-100, 100))
+
+  def _load_initial_pid(self):
+    df = pd.read_csv(f"{directory}/src/pid.csv")
+    return {
+      "roll": (df.loc[df["k"] == "roll", "p"].iloc[0],
+               df.loc[df["k"] == "roll", "i"].iloc[0],
+               df.loc[df["k"] == "roll", "d"].iloc[0]),
+      "pitch": (df.loc[df["k"] == "pitch", "p"].iloc[0],
+                df.loc[df["k"] == "pitch", "i"].iloc[0],
+                df.loc[df["k"] == "pitch", "d"].iloc[0]),
+      "yaw": (df.loc[df["k"] == "yaw", "p"].iloc[0],
+              df.loc[df["k"] == "yaw", "i"].iloc[0],
+              df.loc[df["k"] == "yaw", "d"].iloc[0])
+    }
 
   def gradual_thrust_increase(self):
     """Gradually increases and decreases thrust for testing stability."""
@@ -80,7 +96,7 @@ class Command:
     target_roll_rate = 0.0  # Keep roll stable (deg/sec)
     target_pitch_rate = 0.0 # Keep pitch stable (deg/sec)
     target_yaw_rate = 0.0   # Maintain yaw direction (deg/sec)
-    thrust = 20000          # Fixed thrust
+    thrust = 27000          # Fixed thrust
 
     while True:
       current_roll_rate = self.drone_logger.get_gyro_x()
