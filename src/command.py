@@ -96,7 +96,7 @@ class Command:
     target_roll_rate = 0.0  # Keep roll stable (deg/sec)
     target_pitch_rate = 0.0 # Keep pitch stable (deg/sec)
     target_yaw_rate = 0.0   # Maintain yaw direction (deg/sec)
-    thrust = 27000          # Fixed thrust
+    thrust = 20000          # Fixed thrust
 
     while True:
       current_roll_rate = self.drone_logger.get_gyro_x()

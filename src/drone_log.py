@@ -2,6 +2,9 @@ import time
 import os
 import threading
 import sys
+import pandas as pd
+import datetime
+
 from pathlib import Path
 from cflib.crazyflie.log import LogConfig
 from utils import logger, context
@@ -42,6 +45,44 @@ class DroneLogs:
     self.motor_m2 = 0
     self.motor_m3 = 0
     self.motor_m4 = 0
+
+    self._write_logs()
+
+  def _write_logs(self):
+    """
+    Continuously write drone data to a CSV file in the background.
+    """
+    curr_time = datetime.datetime.now().strftime("%H-%M-%S")
+    log_path = f"{directory}/data/{curr_time}_telemetry_log.csv"
+
+    columns = [
+        "id",
+        "cmd_thrust", "cmd_roll", "cmd_pitch", "cmd_yaw",
+        "gyro_x", "gyro_y", "gyro_z",
+        "pm_vbatMV", "pm_batteryLevel",
+        "motor_m1", "motor_m2", "motor_m3", "motor_m4"
+    ]
+
+    with open(log_path, mode='w', encoding='utf-8') as f:
+      f.write(",".join(columns) + "\n")
+
+    def _log_writer():
+      while not self._stop_event.is_set():
+        with self.lock:
+          row = [
+              time.time(),
+              self.cmd_thrust, self.cmd_roll, self.cmd_pitch, self.cmd_yaw,
+              self.gyro_x, self.gyro_y, self.gyro_z,
+              self.pm_vbatMV, self.pm_batteryLevel,
+              self.motor_m1, self.motor_m2, self.motor_m3, self.motor_m4
+          ]
+
+        with open(log_path, mode='a', encoding='utf-8') as f:
+          f.write(",".join(map(str, row)) + "\n")
+
+        time.sleep(0.5)
+
+    threading.Thread(target=_log_writer, daemon=True).start()
 
   def start_logging(self):
     """
