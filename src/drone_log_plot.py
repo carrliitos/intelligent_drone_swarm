@@ -45,44 +45,58 @@ def animate(i):
     if "timestamp" not in df.columns:
       raise ValueError("Missing 'timestamp' column in telemetry CSV")
 
-    df["timestamp"] = pd.to_datetime(df["timestamp"])
+    df["timestamp"] = pd.to_datetime(df["timestamp"], unit="s")
 
     for ax in axs.flat:
       ax.clear()
 
-    # Row 1: Roll + Gyro.x
+    # Row 1: Roll
     ax1_left.plot(df["timestamp"], df[gyro_x], label="gyro.x")
     ax1_left.set_title("Roll Rate (gyro.x)")
     ax1_left.grid(True)
 
     ax1_right.plot(df["timestamp"], df[cmd_roll], label="cmd_roll", linestyle="--", color="orange")
-    ax1_right.set_title("Roll PID Output (cmd_roll)")
+    ax1_right.plot(df["timestamp"], df["roll_outP"], label="roll_outP", linestyle=":", color="blue")
+    ax1_right.plot(df["timestamp"], df["roll_outI"], label="roll_outI", linestyle=":", color="green")
+    ax1_right.plot(df["timestamp"], df["roll_outD"], label="roll_outD", linestyle=":", color="red")
+    ax1_right.set_title("Roll PID Output")
+    ax1_right.legend()
     ax1_right.grid(True)
 
-    # Row 2: Pitch + Gyro.y
+    # Row 2: Pitch
     ax2_left.plot(df["timestamp"], df[gyro_y], label="gyro.y")
     ax2_left.set_title("Pitch Rate (gyro.y)")
     ax2_left.grid(True)
 
     ax2_right.plot(df["timestamp"], df[cmd_pitch], label="cmd_pitch", linestyle="--", color="orange")
-    ax2_right.set_title("Pitch PID Output (cmd_pitch)")
+    ax2_right.plot(df["timestamp"], df["pitch_outP"], label="pitch_outP", linestyle=":", color="blue")
+    ax2_right.plot(df["timestamp"], df["pitch_outI"], label="pitch_outI", linestyle=":", color="green")
+    ax2_right.plot(df["timestamp"], df["pitch_outD"], label="pitch_outD", linestyle=":", color="red")
+    ax2_right.set_title("Pitch PID Output")
+    ax2_right.legend()
     ax2_right.grid(True)
 
-    # Row 3: Yaw + Gyro.z
+    # Row 3: Yaw
     ax3_left.plot(df["timestamp"], df[gyro_z], label="gyro.z")
     ax3_left.set_title("Yaw Rate (gyro.z)")
     ax3_left.grid(True)
 
     ax3_right.plot(df["timestamp"], df[cmd_yaw], label="cmd_yaw", linestyle="--", color="orange")
-    ax3_right.set_title("Yaw PID Output (cmd_yaw)")
+    ax3_right.plot(df["timestamp"], df["yaw_outP"], label="yaw_outP", linestyle=":", color="blue")
+    ax3_right.plot(df["timestamp"], df["yaw_outI"], label="yaw_outI", linestyle=":", color="green")
+    ax3_right.plot(df["timestamp"], df["yaw_outD"], label="yaw_outD", linestyle=":", color="red")
+    ax3_right.set_title("Yaw PID Output")
+    ax3_right.legend()
     ax3_right.grid(True)
 
+    # Time formatting
     for ax in axs.flat:
       ax.tick_params(axis='x', rotation=30)
       ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M:%S"))
 
   except Exception as e:
     print(f"[Plot Error] {e}")
+
 
 ani = animation.FuncAnimation(fig, animate, interval=500)
 plt.tight_layout()
