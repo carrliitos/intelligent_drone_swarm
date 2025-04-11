@@ -1,7 +1,14 @@
 import time
+import threading
+import os
+from utils import context
+
+directory = context.get_context(os.path.abspath(__file__))
 
 class PIDController:
   def __init__(self, kp, ki, kd, setpoint=0.0, output_limits=(0, 65535), sample_time=0.01):
+    self._stop_event = threading.Event()  # Threading event to signal logging stop
+    self.lock = threading.Lock()
     self.kp = kp
     self.ki = ki
     self.kd = kd
@@ -17,6 +24,30 @@ class PIDController:
     self.last_proportional = 0.0
     self.last_integral = 0.0
     self.last_derivative = 0.0
+
+    self._write_logs()
+
+  def _write_logs(self):
+    """
+    Continuously write PID data to a CSV file in the background.
+    """
+    log_path = f"{directory}/data/PID_logs.csv"
+    columns = ["timestamp", "proportional", "integral", "derivative"]
+
+    with open(log_path, mode='w', encoding='utf-8') as f:
+      f.write(",".join(columns) + "\n")
+
+    def _log_writer():
+      while not self._stop_event.is_set():
+        with self.lock:
+          row = [time.time(), self.last_proportional, self.last_integral, self.last_derivative]
+
+        with open(log_path, mode='a', encoding='utf-8') as f:
+          f.write(",".join(map(str, row)) + "\n")
+
+        time.sleep(0.5)
+
+    threading.Thread(target=_log_writer, daemon=True).start()
 
   def _clamp(self, value, limits):
     lower, upper = limits
