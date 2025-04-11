@@ -11,7 +11,7 @@ timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 directory = context.get_context(os.path.abspath(__file__))
 DATA_DIR = f"{directory}/data"
 PLOT_SAVE_PATH = f"{directory}/data/figs/{timestamp}_telemetry.png"
-WINDOW = 100 # Rolling window size
+WINDOW = 20 # Rolling window size
 
 def get_latest_csv():
   csv_files = glob.glob(os.path.join(DATA_DIR, "telemetry_log.csv"))
@@ -92,13 +92,13 @@ def animate(i):
     # Time formatting
     for ax in axs.flat:
       ax.tick_params(axis='x', rotation=30)
+      ax.xaxis.set_major_locator(mdates.SecondLocator(interval=1))
       ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M:%S"))
 
   except Exception as e:
     print(f"[Plot Error] {e}")
 
-
-ani = animation.FuncAnimation(fig, animate, interval=500)
+ani = animation.FuncAnimation(fig, animate, interval=150)
 plt.tight_layout()
 plt.show()
 fig.savefig(PLOT_SAVE_PATH)
