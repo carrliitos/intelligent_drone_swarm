@@ -93,14 +93,15 @@ class Command:
       logger.info("Thrust set to 0 for safety.")
 
   def hover(self):
-    target_roll_rate = 0.0  # Keep roll stable (deg/sec)
-    target_pitch_rate = 0.0 # Keep pitch stable (deg/sec)
-    target_yaw_rate = 0.0   # Maintain yaw direction (deg/sec)
-    thrust = 27000          # Fixed thrust
+    target_roll_rate = 0.0     # Keep roll stable (deg/sec)
+    target_pitch_rate = 0.0    # Keep pitch stable (deg/sec)
+    target_yaw_rate = 0.0      # Maintain yaw direction (deg/sec)
+    thrust = self.thrust_limit # Fixed thrust
 
     hold_time = 5 # seconds
     start_time = time.time()
     while (time.time() - start_time) < hold_time:
+    # while True:
       current_roll_rate = self.drone_logger.get_roll()
       current_pitch_rate = self.drone_logger.get_pitch()
       current_yaw_rate = self.drone_logger.get_yaw()
