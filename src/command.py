@@ -20,7 +20,8 @@ class Command:
                thrust_start: int, 
                thrust_limit: int, 
                thrust_step: int, 
-               thrust_delay: float):
+               thrust_delay: float,
+               thrust_control: dict[str, bool]):
     """
     Handles gradual thrust commands for the drone.
 
@@ -30,6 +31,11 @@ class Command:
     :param thrust_limit: Maximum thrust value.
     :param thrust_step: Step increment for thrust increase.
     :param thrust_delay: Delay between thrust updates.
+    :param thrust_control: A shared dictionary with boolean flags used to 
+                           control thrust dynamically. When 'increase' is True, 
+                           thrust increases; when 'decrease' is True, thrust 
+                           decreases. These flags are set via keyboard input 
+                           (e.g., spacebar and CTRL+spacebar).
     """
     self.drone = drone
     self.drone_logger = drone_logger
@@ -37,6 +43,7 @@ class Command:
     self.thrust_limit = thrust_limit
     self.thrust_step = thrust_step
     self.thrust_delay = thrust_delay
+    self.thrust_control = thrust_control
 
     # Rate-based PID controls
     pid_vals = self._load_initial_pid()
@@ -118,4 +125,39 @@ class Command:
       )
 
       time.sleep(self.thrust_delay)
+
+  def manual_hover(self):
+    """
+    Hover loop with manual thrust adjustment.
+    Spacebar to increase thrust, Ctrl+Space to decrease.
+    """
+    thrust = self.thrust_start
+    max_thrust = self.thrust_limit
+    step = self.thrust_step
+    delay = self.thrust_delay
+
+    logger.info("Manual hover control started. Use SPACE to increase thrust, CTRL+SPACE to decrease.")
+
+    while True:
+      current_roll = self.drone_logger.get_roll()
+      current_pitch = self.drone_logger.get_pitch()
+      current_yaw = self.drone_logger.get_yaw()
+
+      roll_corr = self.roll_rate_pid.update(current_roll)
+      pitch_corr = self.pitch_rate_pid.update(current_pitch)
+      yaw_corr = self.yaw_rate_pid.update(current_yaw)
+
+      if self.thrust_control["space"] and not self.thrust_control["ctrl"]:
+        thrust = min(thrust + step, max_thrust)
+      elif self.thrust_control["space"] and self.thrust_control["ctrl"]:
+        thrust = max(thrust - step, 0)
+
+      self.drone._cf.commander.send_setpoint(
+        roll_corr,
+        pitch_corr,
+        yaw_corr,
+        int(thrust)
+      )
+
+      time.sleep(delay)
 

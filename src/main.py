@@ -2,6 +2,8 @@ import os
 import sys
 import time
 from pathlib import Path
+from pynput import keyboard
+from threading import Thread
 
 from utils import logger
 from utils import context
@@ -19,6 +21,29 @@ logger_name = Path(__file__).stem
 logger_file = f"{directory}/logs/{logger_file_name}.log"
 logger = logger.setup_logger(logger_name, logger_file)
 
+# Thread-safe control flags
+thrust_control = {
+  "space": False,
+  "ctrl": False
+}
+
+def on_press(key):
+  if key == keyboard.Key.space:
+    thrust_control["space"] = True
+  elif key in (keyboard.Key.ctrl_l, keyboard.Key.ctrl_r):
+    thrust_control["ctrl"] = True
+
+def on_release(key):
+  if key == keyboard.Key.space:
+    thrust_control["space"] = False
+  elif key in (keyboard.Key.ctrl_l, keyboard.Key.ctrl_r):
+    thrust_control["ctrl"] = False
+
+def start_keyboard_listener():
+  listener = keyboard.Listener(on_press=on_press, on_release=on_release)
+  listener.daemon = True
+  listener.start()
+
 def main():
   cflib.crtp.init_drivers(enable_debug_driver=False)
   drone_udp = "udp://192.168.43.42:2390"
@@ -27,9 +52,10 @@ def main():
   command = Command(drone=drone,
                     drone_logger=drone_logger, 
                     thrust_start=0, 
-                    thrust_limit=35000, 
-                    thrust_step=1000, 
-                    thrust_delay=0.01)
+                    thrust_limit=30000, 
+                    thrust_step=50, 
+                    thrust_delay=0.01,
+                    thrust_control=thrust_control)
 
   try:
     drone.connect()
@@ -43,6 +69,12 @@ def main():
     
     # command.gradual_thrust_increase()
     command.hover()
+
+    # start_keyboard_listener()
+    # Thread(target=command.manual_hover, daemon=True).start()
+
+    # while True:
+    #   time.sleep(1)
   except KeyboardInterrupt:
     logger.debug("Operation interrupted by user.")
   except Exception as e:
