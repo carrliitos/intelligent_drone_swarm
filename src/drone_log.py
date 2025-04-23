@@ -32,10 +32,10 @@ class DroneLogs:
 
     self.lock = threading.Lock()
 
-    self.cmd_thrust = 0.0
-    self.cmd_roll = 0.0
-    self.cmd_pitch = 0.0
-    self.cmd_yaw = 0.0
+    self.thrust = 0.0
+    self.roll = 0.0
+    self.pitch = 0.0
+    self.yaw = 0.0
     self.gyro_x = 0.0
     self.gyro_y = 0.0
     self.gyro_z = 0.0
@@ -66,7 +66,7 @@ class DroneLogs:
 
     columns = [
         "timestamp",
-        "cmd_thrust", "cmd_roll", "cmd_pitch", "cmd_yaw",
+        "thrust", "roll", "pitch", "yaw",
         "gyro_x", "gyro_y", "gyro_z",
         "pm_vbatMV", "pm_batteryLevel",
         "motor_m1", "motor_m2", "motor_m3", "motor_m4",
@@ -83,7 +83,7 @@ class DroneLogs:
         with self.lock:
           row = [
               time.time(),
-              self.cmd_thrust, self.cmd_roll, self.cmd_pitch, self.cmd_yaw,
+              self.thrust, self.roll, self.pitch, self.yaw,
               self.gyro_x, self.gyro_y, self.gyro_z,
               self.pm_vbatMV, self.pm_batteryLevel,
               self.motor_m1, self.motor_m2, self.motor_m3, self.motor_m4,
@@ -262,9 +262,9 @@ class DroneLogs:
     self.control_log_config = LogConfig(name="control_states", period_in_ms=500)
 
     try:
-      self.control_log_config.add_variable("controller.cmd_roll", "float")
-      self.control_log_config.add_variable("controller.cmd_pitch", "float")
-      self.control_log_config.add_variable("controller.cmd_yaw", "float")
+      self.control_log_config.add_variable("stateEstimateZ.rateRoll", "float")
+      self.control_log_config.add_variable("stateEstimateZ.ratePitch", "float")
+      self.control_log_config.add_variable("stateEstimateZ.rateYaw", "float")
       self.control_log_config.add_variable("controller.cmd_thrust", "float")
 
       self._cf.log.add_config(self.control_log_config)
@@ -385,10 +385,10 @@ class DroneLogs:
   def _log_callback__controller(self, timestamp, data, logconf):
     """ Callback for controller data. """
     with self.lock:
-      self.cmd_thrust = data["controller.cmd_thrust"]
-      self.cmd_roll = data["controller.cmd_roll"]
-      self.cmd_pitch = data["controller.cmd_pitch"]
-      self.cmd_yaw = data["controller.cmd_yaw"]
+      self.thrust = data["controller.cmd_thrust"]
+      self.roll = data["stateEstimateZ.rateRoll"]
+      self.pitch = data["stateEstimateZ.ratePitch"]
+      self.yaw = data["stateEstimateZ.rateYaw"]
 
     logger.info(f"Timestamp: {timestamp}, Data: {data}")
 
@@ -408,19 +408,19 @@ class DroneLogs:
 
   def get_thrust(self):
     with self.lock:
-      return self.cmd_thrust
+      return self.thrust
 
   def get_roll(self):
     with self.lock:
-      return self.cmd_roll
+      return self.roll
 
   def get_pitch(self):
     with self.lock:
-      return self.cmd_pitch
+      return self.pitch
 
   def get_yaw(self):
     with self.lock:
-      return self.cmd_yaw
+      return self.yaw
 
   def get_gyro_x(self):
     with self.lock:
