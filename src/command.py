@@ -1,58 +1,121 @@
 import time
-from esp_drone_udp import send_command, send_log_request, receive_packet
+import os
+import pandas as pd
+from pathlib import Path
 
-# Configuration for thrust control
-THRUST_START = 0       # Starting thrust value
-THRUST_LIMIT = 60000   # Maximum thrust limit
-THRUST_STEP = 2000     # Increment per step
-THRUST_DELAY = 0.1     # Delay between each step in seconds
+from utils import logger, context
+from esp_drone_udp import UDPConnection
+from drone_log import DroneLogs
+from pid_controller import PIDController
 
-def gradual_thrust_increase():
-  """Gradually increases thrust to the specified limit."""
-  thrust = THRUST_START
-  try:
-    print(f"Gradually increasing thrust to {THRUST_LIMIT}...")
+directory = context.get_context(os.path.abspath(__file__))
+logger_file_name = Path(directory).stem
+logger_name = Path(__file__).stem
+logger = logger.setup_logger(logger_name, f"{directory}/logs/{logger_file_name}.log")
 
-    # Gradually increase thrust
-    while thrust <= THRUST_LIMIT:
-      send_command(0.0, 0.0, 0.0, thrust)  # Sending only thrust commands
-      print(f"Thrust: {thrust}")
-      thrust += THRUST_STEP
-      time.sleep(THRUST_DELAY)
+class Command:
+  def __init__(self, 
+               drone: UDPConnection, 
+               drone_logger: DroneLogs,
+               thrust_start: int, 
+               thrust_limit: int, 
+               thrust_step: int, 
+               thrust_delay: float):
+    """
+    Handles gradual thrust commands for the drone.
 
-    # Maintain max thrust for a short time
-    print("Holding max thrust...")
-    for _ in range(10):
-      send_command(0.0, 0.0, 0.0, THRUST_LIMIT)
-      time.sleep(THRUST_DELAY)
+    :param drone: Instance of UDPConnection.
+    :param drone_logger: Instance of DroneLogs.
+    :param thrust_start: Initial thrust value.
+    :param thrust_limit: Maximum thrust value.
+    :param thrust_step: Step increment for thrust increase.
+    :param thrust_delay: Delay between thrust updates.
+    """
+    self.drone = drone
+    self.drone_logger = drone_logger
+    self.thrust_start = thrust_start
+    self.thrust_limit = thrust_limit
+    self.thrust_step = thrust_step
+    self.thrust_delay = thrust_delay
 
-    # Reduce thrust back to 0 gradually
-    print("Reducing thrust to 0...")
-    while thrust >= 0:
-      send_command(0.0, 0.0, 0.0, thrust)
-      print(f"Thrust: {thrust}")
-      thrust -= THRUST_STEP
-      time.sleep(THRUST_DELAY)
+    # Rate-based PID controls
+    pid_vals = self._load_initial_pid()
+    self.roll_rate_pid = PIDController(*pid_vals["roll"], output_limits=(-30, 30))
+    self.pitch_rate_pid = PIDController(*pid_vals["pitch"], output_limits=(-30, 30))
+    self.yaw_rate_pid = PIDController(*pid_vals["yaw"], output_limits=(-100, 100))
 
-  except KeyboardInterrupt:
-    print("Thrust control interrupted by user.")
+  def _load_initial_pid(self):
+    df = pd.read_csv(f"{directory}/src/pid.csv")
+    return {
+      "roll": (df.loc[df["k"] == "roll", "p"].iloc[0],
+               df.loc[df["k"] == "roll", "i"].iloc[0],
+               df.loc[df["k"] == "roll", "d"].iloc[0]),
+      "pitch": (df.loc[df["k"] == "pitch", "p"].iloc[0],
+                df.loc[df["k"] == "pitch", "i"].iloc[0],
+                df.loc[df["k"] == "pitch", "d"].iloc[0]),
+      "yaw": (df.loc[df["k"] == "yaw", "p"].iloc[0],
+              df.loc[df["k"] == "yaw", "i"].iloc[0],
+              df.loc[df["k"] == "yaw", "d"].iloc[0])
+    }
 
-def fetch_logs():
-  """Fetch and display logs for rxRate and txRate."""
-  # Request rxRate
-  send_log_request('rxRate')
-  time.sleep(0.1)
-  rx_response = receive_packet()
-  if rx_response:
-    # Extract rxRate (assuming 2-byte uint16_t at index 1 and 2)
-    rx_rate = int.from_bytes(rx_response[1:3], 'little')
-    print(f"rxRate: {rx_rate}")
+  def gradual_thrust_increase(self):
+    """Gradually increases and decreases thrust for testing stability."""
+    thrust = self.thrust_start
 
-  # Request txRate
-  send_log_request('txRate')
-  time.sleep(0.1)
-  tx_response = receive_packet()
-  if tx_response:
-    # Extract txRate (assuming 2-byte uint16_t at index 1 and 2)
-    tx_rate = int.from_bytes(tx_response[1:3], 'little')
-    print(f"txRate: {tx_rate}")
+    try:
+      logger.info(f"Gradually increasing thrust to {self.thrust_limit}...")
+
+      # Gradually increase thrust
+      while thrust <= self.thrust_limit:
+        self.drone._cf.commander.send_setpoint(0.0, 0.0, 0.0, thrust)
+        thrust += self.thrust_step
+        time.sleep(self.thrust_delay)
+
+      # Maintain max thrust for a short time
+      logger.info("Holding max thrust...")
+      hold_time = 30 # seconds
+      start_time = time.time()
+      while (time.time() - start_time) < hold_time:
+        self.drone._cf.commander.send_setpoint(0.0, 0.0, 0.0, self.thrust_limit)
+        time.sleep(self.thrust_delay)
+
+      # Reduce thrust back to 0 gradually
+      logger.info("Reducing thrust to 0...")
+      while thrust >= 0:
+        self.drone._cf.commander.send_setpoint(0.0, 0.0, 0.0, thrust)
+        thrust -= int(self.thrust_step / 2)
+        time.sleep(self.thrust_delay)
+
+    except KeyboardInterrupt:
+      logger.debug("Thrust control interrupted by user.")
+    finally:
+      self.drone._cf.commander.send_setpoint(0.0, 0.0, 0.0, 0)  # Ensure drone stops safely
+      logger.info("Thrust set to 0 for safety.")
+
+  def hover(self):
+    target_roll_rate = 0.0     # Keep roll stable (deg/sec)
+    target_pitch_rate = 0.0    # Keep pitch stable (deg/sec)
+    target_yaw_rate = 0.0      # Maintain yaw direction (deg/sec)
+    thrust = self.thrust_limit # Fixed thrust
+
+    hold_time = 5 # seconds
+    start_time = time.time()
+    while (time.time() - start_time) < hold_time:
+    # while True:
+      current_roll_rate = self.drone_logger.get_roll()
+      current_pitch_rate = self.drone_logger.get_pitch()
+      current_yaw_rate = self.drone_logger.get_yaw()
+
+      roll_correction = self.roll_rate_pid.update(current_roll_rate)
+      pitch_correction = self.pitch_rate_pid.update(current_pitch_rate)
+      yaw_rate_correction = self.yaw_rate_pid.update(current_yaw_rate)
+
+      self.drone._cf.commander.send_setpoint(
+        roll_correction,     # Roll correction (degrees)
+        pitch_correction,    # Pitch correction (degrees)
+        yaw_rate_correction, # Yaw rate correction (degrees/sec)
+        int(thrust)          # Thrust value (PWM)
+      )
+
+      time.sleep(self.thrust_delay)
+
