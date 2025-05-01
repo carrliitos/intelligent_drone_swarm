@@ -8,6 +8,8 @@ from utils import context
 from esp_drone_udp import UDPConnection
 from command import Command
 from drone_log import DroneLogs
+from watchdog.observers import Observer
+from pid_watchdog import CSVFileHandler
 
 import cflib
 
@@ -22,9 +24,10 @@ def main():
   drone_udp = "udp://192.168.43.42:2390"
   drone = UDPConnection(drone_udp)
   drone_logger = DroneLogs(drone)
-  command = Command(drone=drone, 
+  command = Command(drone=drone,
+                    drone_logger=drone_logger, 
                     thrust_start=0, 
-                    thrust_limit=30000, 
+                    thrust_limit=35000, 
                     thrust_step=1000, 
                     thrust_delay=0.01)
 
@@ -32,7 +35,14 @@ def main():
     drone.connect()
     time.sleep(5) # 5 second wait
     drone_logger.start_logging()
-    command.gradual_thrust_increase()
+
+    event_handler = CSVFileHandler(command)
+    observer = Observer()
+    observer.schedule(event_handler, path="./src", recursive=False)
+    observer.start()
+    
+    # command.gradual_thrust_increase()
+    command.hover()
   except KeyboardInterrupt:
     logger.debug("Operation interrupted by user.")
   except Exception as e:

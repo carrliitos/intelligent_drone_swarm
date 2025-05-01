@@ -87,6 +87,10 @@ class UDPConnection:
           time.sleep(1)
         self._thrust_test()
 
+        if self._cf.state != 2:
+          logger.error(f"We are not connected ({self._cf.state}). Disconnecting...")
+          sys.exit(1)
+
         logger.info(f"We are connected ({self._cf.state}). CTRL+C to disconnect.")
         return self
     except Exception as e:

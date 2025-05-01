@@ -4,8 +4,10 @@ archive/*
 !archive/.gitkeep
 cache/*
 !cache/.gitkeep
-data/*
+data/*.csv
 !data/.gitkeep
+data/figs/*.png
+!data/figs/.gitkeep
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
