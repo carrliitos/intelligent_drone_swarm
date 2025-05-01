@@ -24,15 +24,16 @@ def main():
   drone_logger = DroneLogs(drone)
   command = Command(drone=drone, 
                     thrust_start=0, 
-                    thrust_limit=30000, 
-                    thrust_step=1000, 
+                    thrust_limit=40000,
+                    thrust_step=1000,
                     thrust_delay=0.01)
 
   try:
     drone.connect()
-    time.sleep(5) # 5 second wait
-    drone_logger.start_logging()
-    command.gradual_thrust_increase()
+    #time.sleep(5) # 5 second wait
+    #drone_logger.start_logging()
+    #command.gradual_thrust_increase()
+    command.pygame_test()
   except KeyboardInterrupt:
     logger.debug("Operation interrupted by user.")
   except Exception as e:

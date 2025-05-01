@@ -1,9 +1,13 @@
 import time
 import os
+import pygame
+#import esp_drone_udp
 from pathlib import Path
 
 from utils import logger, context
 from esp_drone_udp import UDPConnection
+
+#from cflib.crazyflie import Crazyflie #for cf state value
 
 directory = context.get_context(os.path.abspath(__file__))
 logger_file_name = Path(directory).stem
@@ -31,6 +35,8 @@ class Command:
     self.thrust_limit = thrust_limit
     self.thrust_step = thrust_step
     self.thrust_delay = thrust_delay
+
+    #self._cf = Crazyflie(rw_cache='./cache') #testing cf connection directly for updated value
 
   def gradual_thrust_increase(self):
     """Gradually increases and decreases thrust for testing stability."""
@@ -67,3 +73,74 @@ class Command:
     finally:
       self.drone._cf.commander.send_setpoint(0.0, 0.0, 0.0, 0)  # Ensure drone stops safely
       logger.info("Thrust set to 0 for safety.")
+
+
+  def pygame_test(self):
+    done = False
+    pressed = False
+    thrust = self.thrust_start
+
+    logger.info("In pygame function")
+    screen = pygame.display.set_mode((277, 638))
+    #stick = pygame.joystick.Joystick(0)
+    pygame.joystick.init()
+    print(pygame.joystick.get_count())
+    #print(pygame.joystick.Joystick.)
+
+    #print(self.drone._cf.state)
+
+    while not done:
+      #print(self.drone._cf.state)
+      #pygame.joystick.Joystick(0)
+      # stick.init()
+
+      for event in pygame.event.get():
+        if event.type == pygame.QUIT:
+          pygame.quit()
+          exit()
+
+        if event.type == pygame.KEYDOWN:
+          if event.key == pygame.K_SPACE:
+            pressed = True
+
+          if event.key == pygame.K_BACKSPACE:
+            done = True
+
+        if event.type == pygame.KEYUP:
+          if event.key == pygame.K_SPACE:
+            pressed = False
+            thrust = self.thrust_start
+
+        if event.type == pygame.JOYBUTTONDOWN:
+          if event.button == pygame.JOYBUTTONDOWN:
+            print("button pressed")
+            pressed = True
+
+        if event.type == pygame.JOYBUTTONUP:
+          if event.button == 0:
+            pressed = False
+            thrust = self.thrust_start
+
+
+      if pressed:
+        self.drone._cf.commander.send_setpoint(0.0, 0.0, 0.0, thrust)
+        if thrust < self.thrust_limit:
+          thrust += self.thrust_step
+
+        time.sleep(self.thrust_delay)
+
+      # if  self.drone._cf.state == 2: #create drone class, connect drone continuously
+      #   self.drone._cf.link
+      #   surface = pygame.Surface((60, 40))
+      #   surface.fill((174, 174, 174))
+      #   screen.blit(surface, [0, 0])
+      #   pygame.display.update()
+      #
+      # elif self.drone._cf.state != 2:
+      #   surface = pygame.Surface((60, 40))
+      #   surface.fill((255, 0, 0))
+      #   screen.blit(surface, [0, 0])
+      #   pygame.display.update()
+
+    pygame.display.update()
+    #updates pygame window display
