@@ -1,6 +1,7 @@
 import time
 import os
 import pandas as pd
+import pygame
 from pathlib import Path
 
 from utils import logger, context
@@ -119,3 +120,43 @@ class Command:
 
       time.sleep(self.thrust_delay)
 
+  def pygame(self):
+    done = False
+    thrust = self.thrust_start
+
+    logger.info("In pygame function")
+    screen = pygame.display.set_mode((277, 638))
+    pygame.joystick.init()
+    logger.debug(f"Joystick count: {pygame.joystick.get_count()}")
+
+    try:
+      while not done:
+        for event in pygame.event.get():
+          if event.type == pygame.QUIT:
+            pygame.quit()
+            exit()
+
+          if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_SPACE:
+              thrust = min(thrust + self.thrust_step, self.thrust_limit)
+              logger.info(f"Spacebar pressed. Thrust increased to {thrust}")
+
+            if event.key == pygame.K_DOWN:
+              thrust = max(self.thrust_start, thrust - self.thrust_step)
+              logger.info(f"Down arrow pressed. Thrust decreased to {thrust}")
+
+            if event.key == pygame.K_BACKSPACE:
+              done = True
+
+        self.drone._cf.commander.send_setpoint(0.0, 0.0, 0.0, thrust)
+        time.sleep(self.thrust_delay)
+
+      pygame.quit()
+
+    finally:
+      # Reduce thrust back to 0 gradually
+      logger.info("Reducing thrust to 0...")
+      while thrust >= 0:
+        self.drone._cf.commander.send_setpoint(0.0, 0.0, 0.0, thrust)
+        thrust -= int(self.thrust_step / 2)
+        time.sleep(self.thrust_delay)

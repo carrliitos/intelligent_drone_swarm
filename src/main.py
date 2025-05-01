@@ -26,9 +26,9 @@ def main():
   drone_logger = DroneLogs(drone)
   command = Command(drone=drone,
                     drone_logger=drone_logger, 
-                    thrust_start=0, 
+                    thrust_start=10001, 
                     thrust_limit=35000, 
-                    thrust_step=1000, 
+                    thrust_step=500, 
                     thrust_delay=0.01)
 
   try:
@@ -42,7 +42,8 @@ def main():
     observer.start()
     
     # command.gradual_thrust_increase()
-    command.hover()
+    # command.hover()
+    command.pygame()
   except KeyboardInterrupt:
     logger.debug("Operation interrupted by user.")
   except Exception as e:
