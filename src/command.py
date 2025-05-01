@@ -38,6 +38,9 @@ class Command:
     self.thrust_limit = thrust_limit
     self.thrust_step = thrust_step
     self.thrust_delay = thrust_delay
+    self.roll = 0.0
+    self.pitch = 0.0
+    self.yaw = 0.0
 
     # Rate-based PID controls
     pid_vals = self._load_initial_pid()
@@ -123,6 +126,9 @@ class Command:
   def pygame(self):
     done = False
     thrust = self.thrust_start
+    roll = 0.0
+    pitch = 0.0
+    yaw = 0.0
 
     logger.info("In pygame function")
     screen = pygame.display.set_mode((277, 638))
@@ -137,18 +143,34 @@ class Command:
             exit()
 
           if event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_SPACE:
+            # Thrust
+            if event.key == pygame.K_EQUALS:
               thrust = min(thrust + self.thrust_step, self.thrust_limit)
-              logger.info(f"Spacebar pressed. Thrust increased to {thrust}")
 
-            if event.key == pygame.K_DOWN:
+            if event.key == pygame.K_MINUS:
               thrust = max(self.thrust_start, thrust - self.thrust_step)
-              logger.info(f"Down arrow pressed. Thrust decreased to {thrust}")
 
+            # Roll
+            # if event.key == pygame.K_LEFT:
+            #   roll_step = -0.0001
+            #   roll = roll + roll_step
+            #   self.roll_rate_pid.update(roll)
+
+            # if event.key == pygame.K_RIGHT:
+            #   roll_step = 0.0001
+            #   roll = roll + roll_step
+            #   self.roll_rate_pid.update(roll)
+
+            # Pitch
+            # Yaw 
+
+            # Finish
             if event.key == pygame.K_BACKSPACE:
               done = True
 
-        self.drone._cf.commander.send_setpoint(0.0, 0.0, 0.0, thrust)
+            logger.info(f"roll={roll}, pitch={pitch}, yaw={yaw}, thrust={thrust}")
+
+        self.drone._cf.commander.send_setpoint(roll, pitch, yaw, thrust)
         time.sleep(self.thrust_delay)
 
       pygame.quit()
