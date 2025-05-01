@@ -14,8 +14,7 @@ directory = context.get_context(os.path.abspath(__file__))
 logger_name = Path(__file__).stem
 logger = logger.setup_logger(logger_name, f"{directory}/logs/{logger_name}.log")
 
-
-class ESPDrone:
+class UDPConnection:
   def __init__(self, link_uri):
     self.link_uri = link_uri
     self._cf = Crazyflie(rw_cache='./cache')
@@ -35,9 +34,9 @@ class ESPDrone:
   def _connected(self, link_uri):
     """
     Callback triggered when the Crazyflie successfully connects.
-
-    Start the idle loop in a separate thread.
     """
+
+    # Start the idle loop.
     Thread(target=self._idle, daemon=True).start()
 
   def _disconnected(self, link_uri):
@@ -82,41 +81,30 @@ class ESPDrone:
     try:
       while self._cf.state == 1:
         self._connected(self.link_uri)
+        logger.info("Thrust testing in...")
+        for i in range(5, 0, -1):
+          logger.info(i)
+          time.sleep(1)
+        self._thrust_test()
+
+        if self._cf.state != 2:
+          logger.error(f"We are not connected ({self._cf.state}). Disconnecting...")
+          sys.exit(1)
+
+        logger.info(f"We are connected ({self._cf.state}). CTRL+C to disconnect.")
+        return self
     except Exception as e:
       logger.error(f"Error during connection attempt: {e}")
       sys.exit(1)
 
-  def thrust__gradual(self, thrust_limit):
-    """
-    Testing only. Gradual increase to target thrust limit.
-    """
-    thrust_mult = 1
-    thrust_step = 100
-    thrust_lower_limit = 10000
-    thrust = thrust_lower_limit
-    roll = 0
-    pitch = 0
-    yawrate = 0
+  def _thrust_test(self):
+    logger.info("Thrust test...")
+
+    test_delay = 0.01
+    for _ in range(100):
+      self._cf.commander.send_setpoint(0, 0, 0, 15000)
+      time.sleep(test_delay)
 
     self._cf.commander.send_setpoint(0, 0, 0, 0)
-
-    while thrust < thrust_limit:
-      logger.info(f"Current thrust: {thrust}")
-      self._cf.commander.send_setpoint(roll, pitch, yawrate, thrust)
-      time.sleep(0.1)
-      thrust += thrust_step * thrust_mult
-
-      if thrust > thrust_limit:
-        thrust = thrust_limit
-
-    logger.info(f"Thrust limit reached: {thrust_limit}.")
-    self._cf.commander.send_setpoint(roll, pitch, yawrate, thrust)
-
-  def thrust(self, thrust):
-    roll = 0
-    pitch = 0
-    yawrate = 0
-    self._cf.commander.send_setpoint(0, 0, 0, 0)
-    
-    while thrust:
-      self._cf.commander.send_setpoint(roll, pitch, yawrate, thrust)
+    time.sleep(2)
+    logger.info("Thrust test complete.")

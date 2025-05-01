@@ -42,4 +42,6 @@ def setup_logger(logger_name, log_file, log_level=logging.DEBUG):
   console_handler.setFormatter(formatter)
   logger.addHandler(console_handler)
 
+  logger.flush = True
+
   return logger
