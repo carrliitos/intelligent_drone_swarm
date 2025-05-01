@@ -124,6 +124,11 @@ class Command:
       time.sleep(self.thrust_delay)
 
   def pygame(self):
+    """
+      Roll = a circular (clockwise or anticlockwise) movement of the body as it moves forward.
+      Pitch = nose up or tail up.
+      Yaw = nose moves from side to side.
+    """
     done = False
     thrust = self.thrust_start
     roll = 0.0
@@ -143,34 +148,19 @@ class Command:
             exit()
 
           if event.type == pygame.KEYDOWN:
-            # Thrust
-            if event.key == pygame.K_EQUALS:
-              thrust = min(thrust + self.thrust_step, self.thrust_limit)
-
-            if event.key == pygame.K_MINUS:
-              thrust = max(self.thrust_start, thrust - self.thrust_step)
-
-            # Roll
-            # if event.key == pygame.K_LEFT:
-            #   roll_step = -0.0001
-            #   roll = roll + roll_step
-            #   self.roll_rate_pid.update(roll)
-
-            # if event.key == pygame.K_RIGHT:
-            #   roll_step = 0.0001
-            #   roll = roll + roll_step
-            #   self.roll_rate_pid.update(roll)
-
-            # Pitch
-            # Yaw 
-
-            # Finish
             if event.key == pygame.K_BACKSPACE:
               done = True
 
-            logger.info(f"roll={roll}, pitch={pitch}, yaw={yaw}, thrust={thrust}")
+        keys = pygame.key.get_pressed()
+
+        if keys[pygame.K_EQUALS] or keys[pygame.K_KP_PLUS]:
+          thrust = min(thrust + self.thrust_step, self.thrust_limit)
+
+        if keys[pygame.K_MINUS] or keys[pygame.K_KP_MINUS]:
+          thrust = max(self.thrust_start, thrust - self.thrust_step)
 
         self.drone._cf.commander.send_setpoint(roll, pitch, yaw, thrust)
+        logger.info(f"roll={roll}, pitch={pitch}, yaw={yaw}, thrust={thrust}")
         time.sleep(self.thrust_delay)
 
       pygame.quit()

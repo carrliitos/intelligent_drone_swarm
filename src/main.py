@@ -26,9 +26,9 @@ def main():
   drone_logger = DroneLogs(drone)
   command = Command(drone=drone,
                     drone_logger=drone_logger, 
-                    thrust_start=15000, 
-                    thrust_limit=35000, 
-                    thrust_step=500, 
+                    thrust_start=10000, 
+                    thrust_limit=40000, 
+                    thrust_step=100, 
                     thrust_delay=0.01)
 
   try:
