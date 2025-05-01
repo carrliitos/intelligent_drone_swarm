@@ -151,6 +151,8 @@ class Command:
             if event.key == pygame.K_BACKSPACE:
               done = True
 
+          logger.info(f"roll={roll}, pitch={pitch}, yaw={yaw}, thrust={thrust}")
+
         keys = pygame.key.get_pressed()
 
         if keys[pygame.K_EQUALS] or keys[pygame.K_KP_PLUS]:
@@ -160,7 +162,6 @@ class Command:
           thrust = max(self.thrust_start, thrust - self.thrust_step)
 
         self.drone._cf.commander.send_setpoint(roll, pitch, yaw, thrust)
-        logger.info(f"roll={roll}, pitch={pitch}, yaw={yaw}, thrust={thrust}")
         time.sleep(self.thrust_delay)
 
       pygame.quit()
