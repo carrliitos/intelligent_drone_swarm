@@ -113,6 +113,7 @@ def animate(i):
 
 ani = animation.FuncAnimation(fig, animate, interval=100)
 plt.tight_layout()
+fig.subplots_adjust(top=0.978, bottom=0.126, left=0.065, right=0.989, hspace=0.348, wspace=0.103)
 plt.show()
 fig.savefig(FIG_SAVE_PATH)
 print(f"Saved combined plot to {FIG_SAVE_PATH}")
