@@ -2,6 +2,7 @@ import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from mpl_toolkits.mplot3d import Axes3D
 import matplotlib.dates as mdates
+from matplotlib.ticker import MaxNLocator
 
 import pandas as pd
 import glob
@@ -60,6 +61,10 @@ def animate(i):
     axbattery.clear()
 
     # Plot 3D GYRO Path
+    ax3d.xaxis.set_major_locator(MaxNLocator(nbins=5))
+    ax3d.yaxis.set_major_locator(MaxNLocator(nbins=5))
+    ax3d.zaxis.set_major_locator(MaxNLocator(nbins=5))
+
     ax3d.plot3D(gyro_df[gyro_x], gyro_df[gyro_y], gyro_df[gyro_z], label="Gyro 3D Path", color="blue")
     ax3d.set_xlabel("X")
     ax3d.set_ylabel("Y")
