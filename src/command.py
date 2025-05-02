@@ -154,12 +154,33 @@ class Command:
           logger.info(f"roll={roll}, pitch={pitch}, yaw={yaw}, thrust={thrust}")
 
         keys = pygame.key.get_pressed()
+        mods = pygame.key.get_mods()
 
-        if keys[pygame.K_EQUALS] or keys[pygame.K_KP_PLUS]:
+        if keys[pygame.K_w]:
           thrust = min(thrust + self.thrust_step, self.thrust_limit)
-
-        if keys[pygame.K_MINUS] or keys[pygame.K_KP_MINUS]:
+        if keys[pygame.K_s]:
           thrust = max(self.thrust_start, thrust - self.thrust_step)
+
+        if keys[pygame.K_LEFT]:
+          roll_rate = -0.001
+          roll += roll_rate
+        if keys[pygame.K_RIGHT]:
+          roll_rate = 0.001
+          roll += roll_rate
+
+        if keys[pygame.K_UP]:
+          pitch_rate = 0.05
+          pitch += pitch_rate
+        if keys[pygame.K_DOWN]:
+          pitch_rate = -0.05
+          pitch += pitch_rate
+
+        if (mods & pygame.KMOD_SHIFT) and keys[pygame.K_LEFT]:
+          yaw_rate = -0.001
+          yaw += yaw_rate
+        if (mods & pygame.KMOD_SHIFT) and keys[pygame.K_RIGHT]:
+          yaw_rate = 0.001
+          yaw += yaw_rate
 
         self.drone._cf.commander.send_setpoint(roll, pitch, yaw, thrust)
         time.sleep(self.thrust_delay)
