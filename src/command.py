@@ -1,6 +1,7 @@
 import time
 import os
 import pandas as pd
+import pygame
 from pathlib import Path
 
 from utils import logger, context
@@ -37,6 +38,9 @@ class Command:
     self.thrust_limit = thrust_limit
     self.thrust_step = thrust_step
     self.thrust_delay = thrust_delay
+    self.roll = 0.0
+    self.pitch = 0.0
+    self.yaw = 0.0
 
     # Rate-based PID controls
     pid_vals = self._load_initial_pid()
@@ -119,3 +123,74 @@ class Command:
 
       time.sleep(self.thrust_delay)
 
+  def pygame(self):
+    """
+      Roll = a circular (clockwise or anticlockwise) movement of the body as it moves forward.
+      Pitch = nose up or tail up.
+      Yaw = nose moves from side to side.
+    """
+    done = False
+    thrust = self.thrust_start
+    roll = 0.0
+    pitch = 0.0
+    yaw = 0.0
+
+    logger.info("In pygame function")
+    screen = pygame.display.set_mode((277, 638))
+    pygame.joystick.init()
+    logger.debug(f"Joystick count: {pygame.joystick.get_count()}")
+
+    try:
+      while not done:
+        for event in pygame.event.get():
+          if event.type == pygame.QUIT:
+            pygame.quit()
+            exit()
+
+          if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_BACKSPACE:
+              done = True
+
+          logger.info(f"roll={roll}, pitch={pitch}, yaw={yaw}, thrust={thrust}")
+
+        keys = pygame.key.get_pressed()
+        mods = pygame.key.get_mods()
+
+        if keys[pygame.K_w]:
+          thrust = min(thrust + self.thrust_step, self.thrust_limit)
+        if keys[pygame.K_s]:
+          thrust = max(self.thrust_start, thrust - self.thrust_step)
+
+        if keys[pygame.K_LEFT]:
+          roll_rate = -0.001
+          roll += roll_rate
+        if keys[pygame.K_RIGHT]:
+          roll_rate = 0.001
+          roll += roll_rate
+
+        if keys[pygame.K_UP]:
+          pitch_rate = 0.05
+          pitch += pitch_rate
+        if keys[pygame.K_DOWN]:
+          pitch_rate = -0.05
+          pitch += pitch_rate
+
+        if (mods & pygame.KMOD_SHIFT) and keys[pygame.K_LEFT]:
+          yaw_rate = -0.001
+          yaw += yaw_rate
+        if (mods & pygame.KMOD_SHIFT) and keys[pygame.K_RIGHT]:
+          yaw_rate = 0.001
+          yaw += yaw_rate
+
+        self.drone._cf.commander.send_setpoint(roll, pitch, yaw, thrust)
+        time.sleep(self.thrust_delay)
+
+      pygame.quit()
+
+    finally:
+      # Reduce thrust back to 0 gradually
+      logger.info("Reducing thrust to 0...")
+      while thrust >= 0:
+        self.drone._cf.commander.send_setpoint(0.0, 0.0, 0.0, thrust)
+        thrust -= int(self.thrust_step / 2)
+        time.sleep(self.thrust_delay)
