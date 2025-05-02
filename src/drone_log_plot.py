@@ -29,8 +29,9 @@ fig = plt.figure(figsize=(14, 8))
 # Top row: 3D on left, PID on right
 ax3d = plt.subplot2grid((2, 2), (0, 0), projection='3d')
 axpid = plt.subplot2grid((2, 2), (0, 1))
-# Bottom row: thrust across both columns
-axthrust = plt.subplot2grid((2, 2), (1, 0), colspan=2)
+# Bottom row: thrust on left, battery on right
+axthrust = plt.subplot2grid((2, 2), (1, 0))
+axbattery = plt.subplot2grid((2, 2), (1, 1))
 
 def animate(i):
   try:
@@ -56,13 +57,13 @@ def animate(i):
     ax3d.clear()
     axpid.clear()
     axthrust.clear()
+    axbattery.clear()
 
     # Plot 3D GYRO Path
     ax3d.plot3D(gyro_df[gyro_x], gyro_df[gyro_y], gyro_df[gyro_z], label="Gyro 3D Path", color="blue")
-    ax3d.set_xlabel("Gyro X")
-    ax3d.set_ylabel("Gyro Y")
-    ax3d.set_zlabel("Gyro Z")
-    ax3d.set_title("Gyro Orientation Over Time")
+    ax3d.set_xlabel("X")
+    ax3d.set_ylabel("Y")
+    ax3d.set_zlabel("Z")
     ax3d.legend()
     ax3d.grid(True)
 
@@ -70,28 +71,37 @@ def animate(i):
     axpid.plot(pid_df["timestamp"], pid_df["proportional"], label="Proportional", linestyle="--", color="blue")
     axpid.plot(pid_df["timestamp"], pid_df["integral"], label="Integral", linestyle="--", color="green")
     axpid.plot(pid_df["timestamp"], pid_df["derivative"], label="Derivative", linestyle="--", color="red")
-    axpid.set_title("PID Controller Terms")
     axpid.set_xlabel("Time")
     axpid.set_ylabel("Value")
     axpid.legend()
     axpid.grid(True)
     axpid.tick_params(axis='x', rotation=30)
-    axpid.xaxis.set_major_locator(mdates.SecondLocator(interval=1))
+    axpid.xaxis.set_major_locator(mdates.SecondLocator(interval=5))
     axpid.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M:%S"))
 
-    # Plot Thrust from telemetry_log.csv
     if "thrust" in gyro_df.columns and "timestamp" in gyro_df.columns:
       axthrust.plot(gyro_df["timestamp"], gyro_df["thrust"], label="Thrust", color="purple")
-      axthrust.set_title("Thrust Over Time")
       axthrust.set_xlabel("Time")
       axthrust.set_ylabel("Thrust")
       axthrust.legend()
       axthrust.grid(True)
       axthrust.tick_params(axis='x', rotation=30)
-      axthrust.xaxis.set_major_locator(mdates.SecondLocator(interval=1))
+      axthrust.xaxis.set_major_locator(mdates.SecondLocator(interval=5))
       axthrust.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M:%S"))
     else:
       axthrust.set_title("No 'thrust' or 'timestamp' column in telemetry log.")
+
+    if "pm_batteryLevel" in gyro_df.columns and "timestamp" in gyro_df.columns:
+      axbattery.plot(gyro_df["timestamp"], gyro_df["pm_batteryLevel"], label="Battery Level", color="orange")
+      axbattery.set_xlabel("Time")
+      axbattery.set_ylabel("Battery (%)")
+      axbattery.legend()
+      axbattery.grid(True)
+      axbattery.tick_params(axis='x', rotation=30)
+      axbattery.xaxis.set_major_locator(mdates.SecondLocator(interval=5))
+      axbattery.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M:%S"))
+    else:
+      axbattery.set_title("No 'pm_batteryLevel' or 'timestamp' column in telemetry log.")
 
   except Exception as e:
     print(f"[Plot Error] {e}")
