@@ -1,6 +1,6 @@
 import time
 from esp_drone_udp import close_connection, receive_packet, send_log_request
-from command import gradual_thrust_increase
+from command import gradual_thrust_increase, pygame_test
 
 def fetch_and_print_logs():
   """Fetches and prints log data for rxRate and txRate."""
@@ -25,7 +25,8 @@ def fetch_and_print_logs():
 def main():
   try:
     print("Starting thrust control...")
-    gradual_thrust_increase()  # Run thrust control
+    # gradual_thrust_increase()  # Run thrust control
+    pygame_test()
   except KeyboardInterrupt:
     print("Operation interrupted by user.")
   finally:
