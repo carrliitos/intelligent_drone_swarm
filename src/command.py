@@ -130,7 +130,7 @@ class Command:
       W/S         -> Increase/Decrease Thrust
       ←/→ (Arrow keys)  -> Roll Left/Right
       ↑/↓ (Arrow keys)  -> Pitch Up/Down
-      Shift + ←/→     -> Yaw Left/Right
+      A/D     -> Yaw Left/Right
       Backspace     -> Exit control loop
     """
     done = False
@@ -166,14 +166,15 @@ class Command:
           roll += -0.001
         if keys[pygame.K_RIGHT]:
           roll += 0.001
+
         if keys[pygame.K_UP]:
           pitch += 0.05
         if keys[pygame.K_DOWN]:
           pitch += -0.05
 
-        if (mods & pygame.KMOD_SHIFT) and keys[pygame.K_LEFT]:
+        if keys[pygame.K_a]:
           yaw += -0.001
-        if (mods & pygame.KMOD_SHIFT) and keys[pygame.K_RIGHT]:
+        if keys[pygame.K_d]:
           yaw += 0.001
 
         self.drone._cf.commander.send_setpoint(roll, pitch, yaw, thrust)
@@ -185,7 +186,7 @@ class Command:
           "W/S         | Increase/Decrease Thrust",
           "←/→         | Roll Left/Right",
           "↑/↓         | Pitch Up/Down",
-          "Shift + ←/→ | Yaw Left/Right",
+          "A/D         | Yaw Left/Right",
           "Backspace   | Exit",
           "",
           f"Current Thrust Limit: {self.thrust_limit}",
