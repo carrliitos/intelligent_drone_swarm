@@ -3,33 +3,47 @@
 
 ## Project Overview
 
-This project aims to develop a coordinated drone swarm system using ESP32 microcontrollers, implementing a hierarchical 
-structure with a **mothership** (leader drone) and multiple **child drones** (followers). The primary goal is to achieve 
-synchronized and adaptive behavior in the swarm, capable of handling complex tasks such as mapping, patrolling, 
-search-and-rescue, and collaborative exploration.
+This project develops a coordinated drone swarm system using ESP32 microcontrollers, employing a hierarchical architecture 
+with a **mothership** (leader drone) and multiple **child drones** (followers). The objective is to achieve synchronized 
+and adaptive swarm behaviors for complex tasks such as mapping, patrolling, search-and-rescue, and collaborative exploration.
 
 ## Objectives
 
-- **Centralized Command System**: Develop a control system where the mothership processes inputs from both the 
-environment and follower drones. It will act as the primary decision-maker, coordinating the actions of the child drones 
-based on gathered telemetry data.
-- **Real-Time Communication**: Design protocols to enable efficient, low-latency data exchange between the mothership 
-and child drones, ensuring effective collaboration within the swarm.
+- **Centralized Command System**: The mothership processes telemetry and environmental data, makes decisions, and sends 
+commands to child drones.
+- **Real-Time Communication**: Implements low-latency protocols for data exchange between drones using UDP and CRTP.
 
 ## Core Functionalities
 
-### 1. Formation Flying
-   - The swarm follows a formation led by the mothership, dynamically adjusting based on environmental feedback and 
-   telemetry data from child drones.
-   
-### 2. Synchronized Movements for Mission Execution
-   - **Mapping**: Plan and execute synchronized movements to cover specified areas for mapping purposes.
-   - **Patrolling**: Implement patrolling routes that can be dynamically adjusted based on environmental conditions.
-   - **Search-and-Rescue**: Enable swarm-based exploration and identification for search-and-rescue operations.
+### 0. PyGame Controls (Implemented)
 
-### 3. Collaborative Exploration and Decision-Making
-   - Enable the swarm to collectively explore areas, assess sensory data, and make decisions on further actions based 
-   on real-time environmental inputs.
+An interactive real-time control system using `PyGame` enables manual tuning and testing of drone movements:
+
+| Key            | Function                            |
+|----------------|-------------------------------------|
+| `W`            | Increase thrust                     |
+| `S`            | Decrease thrust                     |
+| `←` / `→`      | Roll (counter/clockwise)            |
+| `↑` / `↓`      | Pitch (nose up/down)                |
+| `Shift + ←/→`  | Yaw (rotate left/right)             |
+| `Backspace`    | Stop the simulation                 |
+
+PID-based stabilization is applied during hover mode. The `Command` class manages thrust ramp-up, hover stabilization, 
+and keyboard-based directional control.
+
+### 1. Formation Flying — *Not Yet Implemented*
+
+Child drones dynamically follow a formation led by the mothership.
+
+### 2. Synchronized Mission Execution — *Not Yet Implemented*
+
+- **Mapping**: Coverage planning for area scans.
+- **Patrolling**: Dynamic patrolling routes.
+- **Search-and-Rescue**: Coordinated exploration to detect and identify targets.
+
+### 3. Collaborative Decision-Making — *Not Yet Implemented*
+
+Swarm-based consensus mechanisms for exploration and decision-making.
 
 ## ESP-Drone Communication Configuration
 
