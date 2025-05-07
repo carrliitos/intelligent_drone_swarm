@@ -1,5 +1,11 @@
 # ESP32 Drone Swarm Coordination System
-> Benzon Carlitos Salazar (salazarbc24@uww.edu)
+
+## Team
+
+- Benzon Carlitos Salazar (salazarbc24@uww.edu)
+- Kevin King (kingk20@uww.edu)
+- Anjali Gupta (guptaam23@uww.edu)
+- Griffin Polly (pollygs14@uww.edu)
 
 ## Project Overview
 
