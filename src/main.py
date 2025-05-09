@@ -21,10 +21,11 @@ logger = logger.setup_logger(logger_name, logger_file)
 
 def main():
   cflib.crtp.init_drivers(enable_debug_driver=False)
-  drone_udp = "udp://192.168.43.42:2390"
+  drone_udp = "udp://192.168.43.51:2390"
   drone = UDPConnection(drone_udp)
   drone_logger = DroneLogs(drone)
   command = Command(drone=drone,
+                    drone_udp=drone_udp,
                     drone_logger=drone_logger, 
                     thrust_start=10000, 
                     thrust_limit=40000, 
