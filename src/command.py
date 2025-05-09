@@ -1,7 +1,7 @@
 import time
 from esp_drone_udp import send_command, send_log_request, receive_packet
 # from esp_now import send_command
-from esp_multidrone_udp import send_command
+# from esp_multidrone_udp import send_command
 
 # Configuration for thrust control
 THRUST_START = 0       # Starting thrust value
