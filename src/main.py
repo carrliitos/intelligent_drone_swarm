@@ -1,5 +1,6 @@
 import time
-from esp_drone_udp import close_connection, receive_packet, send_log_request
+import network
+
 from command import gradual_thrust_increase
 
 def fetch_and_print_logs():
@@ -25,11 +26,10 @@ def fetch_and_print_logs():
 def main():
   try:
     print("Starting thrust control...")
+    time.sleep(3)
     gradual_thrust_increase()  # Run thrust control
   except KeyboardInterrupt:
     print("Operation interrupted by user.")
-  finally:
-    close_connection()  # Close socket connection
 
 if __name__ == "__main__":
   main()

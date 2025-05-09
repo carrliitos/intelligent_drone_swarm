@@ -1,11 +1,13 @@
 import time
 from esp_drone_udp import send_command, send_log_request, receive_packet
+# from esp_now import send_command
+from esp_multidrone_udp import send_command
 
 # Configuration for thrust control
 THRUST_START = 0       # Starting thrust value
-THRUST_LIMIT = 60000   # Maximum thrust limit
-THRUST_STEP = 2000     # Increment per step
-THRUST_DELAY = 0.1     # Delay between each step in seconds
+THRUST_LIMIT = 30000   # Maximum thrust limit
+THRUST_STEP = 1000     # Increment per step
+THRUST_DELAY = 0.05     # Delay between each step in seconds
 
 def gradual_thrust_increase():
   """Gradually increases thrust to the specified limit."""
@@ -16,7 +18,6 @@ def gradual_thrust_increase():
     # Gradually increase thrust
     while thrust <= THRUST_LIMIT:
       send_command(0.0, 0.0, 0.0, thrust)  # Sending only thrust commands
-      print(f"Thrust: {thrust}")
       thrust += THRUST_STEP
       time.sleep(THRUST_DELAY)
 
@@ -30,7 +31,6 @@ def gradual_thrust_increase():
     print("Reducing thrust to 0...")
     while thrust >= 0:
       send_command(0.0, 0.0, 0.0, thrust)
-      print(f"Thrust: {thrust}")
       thrust -= THRUST_STEP
       time.sleep(THRUST_DELAY)
 
