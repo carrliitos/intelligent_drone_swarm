@@ -1,4 +1,5 @@
 import time
+import network
 from esp_drone_udp import close_connection, receive_packet, send_log_request
 from command import gradual_thrust_increase
 
@@ -22,8 +23,18 @@ def fetch_and_print_logs():
     tx_rate = int.from_bytes(tx_response[1:3], 'little')
     print(f"txRate: {tx_rate}")
 
+def connect():
+  sta_if = network.WLAN(network.STA_IF)
+  sta_if.active(True)
+  sta_if.connect("SPUD5_6055F9DA19A1", "12345678")
+  while not sta_if.isconnected():
+    time.sleep(0.1)
+  print("Connected, IP address:", sta_if.ifconfig())
+
 def main():
   try:
+    connect()
+    time.sleep(2)
     print("Starting thrust control...")
     gradual_thrust_increase()  # Run thrust control
   except KeyboardInterrupt:

@@ -3,7 +3,7 @@ from command_packet import build_command_packet
 from command_packet import build_crtp_log_request
 
 # Define connection parameters
-APP_IP = "192.168.43.42" # App IP address
+APP_IP = "192.168.43.51" # App IP address
 APP_PORT = 2399          # App port for sending/receiving
 DRONE_PORT = 2390        # ESP-Drone's listening port
 
@@ -22,7 +22,6 @@ def send_packet(data: bytes):
   """Send a UDP packet to the ESP-Drone."""
   try:
     sock.sendto(data, (APP_IP, DRONE_PORT))
-    print(f"Sent packet: {data.hex()}")
   except Exception as e:
     print(f"Failed to send packet: {e}")
 
