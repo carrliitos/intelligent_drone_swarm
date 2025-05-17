@@ -79,19 +79,7 @@ class UDPConnection:
     Establishes a connection to the Crazyflie, ensuring the connection is active.
     """
     try:
-      while self._cf.state == 1:
-        self._connected(self.link_uri)
-        logger.info("Thrust testing in...")
-        for i in range(5, 0, -1):
-          logger.info(i)
-          time.sleep(1)
-        self._thrust_test()
-
-        if self._cf.state != 2:
-          logger.error(f"We are not connected ({self._cf.state}). Disconnecting...")
-          sys.exit(1)
-
-        logger.info(f"We are connected ({self._cf.state}). CTRL+C to disconnect.")
+      self._connected(self.link_uri)
       return self._cf.state
     except Exception as e:
       logger.error(f"Error during connection attempt: {e}")
