@@ -45,26 +45,6 @@ class Command:
     self.pitch = 0.0
     self.yaw = 0.0
 
-    # Rate-based PID controls
-    pid_vals = self._load_initial_pid()
-    self.roll_rate_pid = PIDController(*pid_vals["roll"], output_limits=(-30, 30))
-    self.pitch_rate_pid = PIDController(*pid_vals["pitch"], output_limits=(-30, 30))
-    self.yaw_rate_pid = PIDController(*pid_vals["yaw"], output_limits=(-100, 100))
-
-  def _load_initial_pid(self):
-    df = pd.read_csv(f"{directory}/src/pid.csv")
-    return {
-      "roll": (df.loc[df["k"] == "roll", "p"].iloc[0],
-               df.loc[df["k"] == "roll", "i"].iloc[0],
-               df.loc[df["k"] == "roll", "d"].iloc[0]),
-      "pitch": (df.loc[df["k"] == "pitch", "p"].iloc[0],
-                df.loc[df["k"] == "pitch", "i"].iloc[0],
-                df.loc[df["k"] == "pitch", "d"].iloc[0]),
-      "yaw": (df.loc[df["k"] == "yaw", "p"].iloc[0],
-              df.loc[df["k"] == "yaw", "i"].iloc[0],
-              df.loc[df["k"] == "yaw", "d"].iloc[0])
-    }
-
   def _let_it_fly(self, current_thrust, limit):
     """Gradually increases and decreases thrust for testing stability."""
     thrust = current_thrust
