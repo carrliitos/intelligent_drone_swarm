@@ -5,7 +5,7 @@ import pygame
 from pathlib import Path
 
 from utils import logger, context
-from drone_connection import UDPConnection
+from drone_connection import DroneConnection
 from drone_log import DroneLogs
 from pid_controller import PIDController
 
@@ -16,8 +16,8 @@ logger = logger.setup_logger(logger_name, f"{directory}/logs/{logger_file_name}.
 
 class Command:
   def __init__(self, 
-               drone: UDPConnection, 
-               drone_udp: str,
+               drone: DroneConnection, 
+               conn_str: str,
                drone_logger: DroneLogs,
                thrust_start: int, 
                thrust_limit: int, 
@@ -26,8 +26,8 @@ class Command:
     """
     Handles gradual thrust commands for the drone.
 
-    :param drone: Instance of UDPConnection.
-    :param drone_udp: Drone UDP string.
+    :param drone: Instance of DroneConnection.
+    :param conn_str: Drone connection string.
     :param drone_logger: Instance of DroneLogs.
     :param thrust_start: Initial thrust value.
     :param thrust_limit: Maximum thrust value.
@@ -35,7 +35,7 @@ class Command:
     :param thrust_delay: Delay between thrust updates.
     """
     self.drone = drone
-    self.drone_udp = drone_udp
+    self.conn_str = conn_str
     self.drone_logger = drone_logger
     self.thrust_start = thrust_start
     self.thrust_limit = thrust_limit
@@ -144,7 +144,6 @@ class Command:
           "Backspace   | Exit",
           "Spacebar    | Just let it fly, man.",
           "",
-          f"Connected to: {self.drone_udp}",
           f"Current Thrust Limit: {self.thrust_limit}",
           f"Current Thrust Step: {self.thrust_step}",
           "",

@@ -5,11 +5,9 @@ from pathlib import Path
 
 from utils import logger
 from utils import context
-from drone_connection import UDPConnection
+from drone_connection import DroneConnection
 from command import Command
 from drone_log import DroneLogs
-from watchdog.observers import Observer
-from pid_watchdog import CSVFileHandler
 
 import cflib
 
@@ -19,13 +17,12 @@ logger_name = Path(__file__).stem
 logger_file = f"{directory}/logs/{logger_file_name}.log"
 logger = logger.setup_logger(logger_name, logger_file)
 
-def main():
+def run(connection_type):
   cflib.crtp.init_drivers(enable_debug_driver=False)
-  drone_udp = "udp://192.168.43.51:2390"
-  drone = UDPConnection(drone_udp)
+  drone = DroneConnection(connection_type)
   drone_logger = DroneLogs(drone)
   command = Command(drone=drone,
-                    drone_udp=drone_udp,
+                    conn_str=drone,
                     drone_logger=drone_logger, 
                     thrust_start=10000, 
                     thrust_limit=40000, 
@@ -36,11 +33,6 @@ def main():
     drone.connect()
     time.sleep(5) # 5 second wait
     drone_logger.start_logging()
-
-    event_handler = CSVFileHandler(command)
-    observer = Observer()
-    observer.schedule(event_handler, path="./src", recursive=False)
-    observer.start()
     
     # command.gradual_thrust_increase()
     # command.hover()
@@ -58,4 +50,18 @@ def main():
       drone._cf.close_link()
 
 if __name__ == '__main__':
-  main()
+  arg = sys.argv[1]
+  connection_type = None
+  UDP = "udp://192.168.43.51:2390"
+  RADIO = None
+
+  logger.info(f"Connection type: {arg}")
+  
+  if arg == "udp":
+    connection_type = UDP
+  elif arg == "radio":
+    connection_type = RADIO
+  else:
+    logger.error("Invalid argument.")
+
+  run(connection_type)
