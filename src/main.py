@@ -5,7 +5,7 @@ from pathlib import Path
 
 from utils import logger
 from utils import context
-from esp_drone_udp import UDPConnection
+from drone_connection import UDPConnection
 from command import Command
 from drone_log import DroneLogs
 from watchdog.observers import Observer

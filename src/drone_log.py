@@ -8,7 +8,7 @@ import datetime
 from pathlib import Path
 from cflib.crazyflie.log import LogConfig
 from utils import logger, context
-from esp_drone_udp import UDPConnection
+from drone_connection import UDPConnection
 
 directory = context.get_context(os.path.abspath(__file__))
 logger_file_name = Path(__file__).stem

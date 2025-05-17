@@ -5,7 +5,7 @@ import pygame
 from pathlib import Path
 
 from utils import logger, context
-from esp_drone_udp import UDPConnection
+from drone_connection import UDPConnection
 from drone_log import DroneLogs
 from pid_controller import PIDController
 
