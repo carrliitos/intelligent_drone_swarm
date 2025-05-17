@@ -14,7 +14,7 @@ directory = context.get_context(os.path.abspath(__file__))
 logger_name = Path(__file__).stem
 logger = logger.setup_logger(logger_name, f"{directory}/logs/{logger_name}.log")
 
-class UDPConnection:
+class DroneConnection:
   def __init__(self, link_uri):
     self.link_uri = link_uri
     self._cf = Crazyflie(rw_cache='./cache')
@@ -79,19 +79,8 @@ class UDPConnection:
     Establishes a connection to the Crazyflie, ensuring the connection is active.
     """
     try:
-      while self._cf.state == 1:
-        self._connected(self.link_uri)
-        logger.info("Thrust testing in...")
-        for i in range(5, 0, -1):
-          logger.info(i)
-          time.sleep(1)
-        self._thrust_test()
-
-        if self._cf.state != 2:
-          logger.error(f"We are not connected ({self._cf.state}). Disconnecting...")
-          sys.exit(1)
-
-        logger.info(f"We are connected ({self._cf.state}). CTRL+C to disconnect.")
+      self._thrust_test()
+      self._connected(self.link_uri)
       return self._cf.state
     except Exception as e:
       logger.error(f"Error during connection attempt: {e}")
@@ -99,7 +88,7 @@ class UDPConnection:
 
   def _thrust_test(self):
     logger.info("Thrust test...")
-
+    time.sleep(2)
     test_delay = 0.01
     for _ in range(100):
       self._cf.commander.send_setpoint(0, 0, 0, 15000)
