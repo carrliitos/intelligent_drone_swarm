@@ -79,6 +79,7 @@ class UDPConnection:
     Establishes a connection to the Crazyflie, ensuring the connection is active.
     """
     try:
+      self._thrust_test()
       self._connected(self.link_uri)
       return self._cf.state
     except Exception as e:
@@ -87,7 +88,7 @@ class UDPConnection:
 
   def _thrust_test(self):
     logger.info("Thrust test...")
-
+    time.sleep(2)
     test_delay = 0.01
     for _ in range(100):
       self._cf.commander.send_setpoint(0, 0, 0, 15000)
