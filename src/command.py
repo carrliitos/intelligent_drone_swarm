@@ -5,7 +5,7 @@ import pygame
 from pathlib import Path
 
 from utils import logger, context
-from esp_drone_udp import UDPConnection
+from drone_connection import DroneConnection
 from drone_log import DroneLogs
 from pid_controller import PIDController
 
@@ -16,8 +16,8 @@ logger = logger.setup_logger(logger_name, f"{directory}/logs/{logger_file_name}.
 
 class Command:
   def __init__(self, 
-               drone: UDPConnection, 
-               drone_udp: str,
+               drone: DroneConnection, 
+               conn_str: str,
                drone_logger: DroneLogs,
                thrust_start: int, 
                thrust_limit: int, 
@@ -26,8 +26,8 @@ class Command:
     """
     Handles gradual thrust commands for the drone.
 
-    :param drone: Instance of UDPConnection.
-    :param drone_udp: Drone UDP string.
+    :param drone: Instance of DroneConnection.
+    :param conn_str: Drone connection string.
     :param drone_logger: Instance of DroneLogs.
     :param thrust_start: Initial thrust value.
     :param thrust_limit: Maximum thrust value.
@@ -35,7 +35,7 @@ class Command:
     :param thrust_delay: Delay between thrust updates.
     """
     self.drone = drone
-    self.drone_udp = drone_udp
+    self.conn_str = conn_str
     self.drone_logger = drone_logger
     self.thrust_start = thrust_start
     self.thrust_limit = thrust_limit
@@ -45,45 +45,26 @@ class Command:
     self.pitch = 0.0
     self.yaw = 0.0
 
-    # Rate-based PID controls
-    pid_vals = self._load_initial_pid()
-    self.roll_rate_pid = PIDController(*pid_vals["roll"], output_limits=(-30, 30))
-    self.pitch_rate_pid = PIDController(*pid_vals["pitch"], output_limits=(-30, 30))
-    self.yaw_rate_pid = PIDController(*pid_vals["yaw"], output_limits=(-100, 100))
-
-  def _load_initial_pid(self):
-    df = pd.read_csv(f"{directory}/src/pid.csv")
-    return {
-      "roll": (df.loc[df["k"] == "roll", "p"].iloc[0],
-               df.loc[df["k"] == "roll", "i"].iloc[0],
-               df.loc[df["k"] == "roll", "d"].iloc[0]),
-      "pitch": (df.loc[df["k"] == "pitch", "p"].iloc[0],
-                df.loc[df["k"] == "pitch", "i"].iloc[0],
-                df.loc[df["k"] == "pitch", "d"].iloc[0]),
-      "yaw": (df.loc[df["k"] == "yaw", "p"].iloc[0],
-              df.loc[df["k"] == "yaw", "i"].iloc[0],
-              df.loc[df["k"] == "yaw", "d"].iloc[0])
-    }
-
-  def gradual_thrust_increase(self):
+  def _let_it_fly(self, current_thrust, limit):
     """Gradually increases and decreases thrust for testing stability."""
-    thrust = self.thrust_start
+    thrust = current_thrust
+    max_thrust = limit
 
     try:
-      logger.info(f"Gradually increasing thrust to {self.thrust_limit}...")
+      logger.info(f"Gradually increasing thrust to {max_thrust}...")
 
       # Gradually increase thrust
-      while thrust <= self.thrust_limit:
+      while thrust <= max_thrust:
         self.drone._cf.commander.send_setpoint(0.0, 0.0, 0.0, thrust)
         thrust += self.thrust_step
         time.sleep(self.thrust_delay)
 
       # Maintain max thrust for a short time
-      logger.info("Holding max thrust...")
-      hold_time = 30 # seconds
+      hold_time = 5 # seconds
+      logger.info(f"Holding max thrust for {hold_time}s...")
       start_time = time.time()
       while (time.time() - start_time) < hold_time:
-        self.drone._cf.commander.send_setpoint(0.0, 0.0, 0.0, self.thrust_limit)
+        self.drone._cf.commander.send_setpoint(0.0, 0.0, 0.0, max_thrust)
         time.sleep(self.thrust_delay)
 
       # Reduce thrust back to 0 gradually
@@ -99,42 +80,9 @@ class Command:
       self.drone._cf.commander.send_setpoint(0.0, 0.0, 0.0, 0)  # Ensure drone stops safely
       logger.info("Thrust set to 0 for safety.")
 
-  def hover(self):
-    target_roll_rate = 0.0     # Keep roll stable (deg/sec)
-    target_pitch_rate = 0.0    # Keep pitch stable (deg/sec)
-    target_yaw_rate = 0.0      # Maintain yaw direction (deg/sec)
-    thrust = self.thrust_limit # Fixed thrust
-
-    hold_time = 5 # seconds
-    start_time = time.time()
-    while (time.time() - start_time) < hold_time:
-    # while True:
-      current_roll_rate = self.drone_logger.get_roll()
-      current_pitch_rate = self.drone_logger.get_pitch()
-      current_yaw_rate = self.drone_logger.get_yaw()
-
-      roll_correction = self.roll_rate_pid.update(current_roll_rate)
-      pitch_correction = self.pitch_rate_pid.update(current_pitch_rate)
-      yaw_rate_correction = self.yaw_rate_pid.update(current_yaw_rate)
-
-      self.drone._cf.commander.send_setpoint(
-        roll_correction,     # Roll correction (degrees)
-        pitch_correction,    # Pitch correction (degrees)
-        yaw_rate_correction, # Yaw rate correction (degrees/sec)
-        int(thrust)          # Thrust value (PWM)
-      )
-
-      time.sleep(self.thrust_delay)
-
   def pygame(self):
     """
-    Interactive PyGame controller for ESP32 drone thrust and orientation.
-    Keys:
-      W/S         -> Increase/Decrease Thrust
-      ←/→ (Arrow keys)  -> Roll Left/Right
-      ↑/↓ (Arrow keys)  -> Pitch Up/Down
-      A/D     -> Yaw Left/Right
-      Backspace     -> Exit control loop
+    Interactive PyGame controller for drone thrust and orientation.
     """
     done = False
     thrust = self.thrust_start
@@ -145,7 +93,7 @@ class Command:
     logger.info("In pygame function")
     pygame.init()
     screen = pygame.display.set_mode((600, 600))
-    pygame.display.set_caption("ESP32-Drone Flight Controls")
+    pygame.display.set_caption("Drone Flight Controls")
     font = pygame.font.SysFont("monospace", 16)
 
     try:
@@ -180,19 +128,22 @@ class Command:
         if keys[pygame.K_d]:
           yaw += 0.001
 
+        if keys[pygame.K_SPACE]:
+          self._let_it_fly(thrust, self.thrust_limit)
+
         self.drone._cf.commander.send_setpoint(roll, pitch, yaw, thrust)
         screen.fill((0, 0, 0))
 
         instructions = [
-          "ESP32 Drone Control",
+          "Drone Control",
           "=======================================",
           "W/S         | Increase/Decrease Thrust",
           "←/→         | Roll Left/Right",
           "↑/↓         | Pitch Up/Down",
           "A/D         | Yaw Left/Right",
           "Backspace   | Exit",
+          "Spacebar    | Just let it fly, man.",
           "",
-          f"Connected to: {self.drone_udp}",
           f"Current Thrust Limit: {self.thrust_limit}",
           f"Current Thrust Step: {self.thrust_step}",
           "",

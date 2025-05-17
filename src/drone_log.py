@@ -8,7 +8,7 @@ import datetime
 from pathlib import Path
 from cflib.crazyflie.log import LogConfig
 from utils import logger, context
-from esp_drone_udp import UDPConnection
+from drone_connection import DroneConnection
 
 directory = context.get_context(os.path.abspath(__file__))
 logger_file_name = Path(__file__).stem
@@ -16,12 +16,12 @@ logger_file = f"{directory}/logs/{logger_file_name}.log"
 logger = logger.setup_logger(logger_file_name, logger_file)
 
 class DroneLogs:
-  def __init__(self, drone: UDPConnection):
+  def __init__(self, drone: DroneConnection):
     """
     Handles logging real-time drone data.
 
     Args:
-      drone (UDPConnection): The Crazyflie UDP connection instance.
+      drone (DroneConnection): The Crazyflie Drone connection instance.
     """
     self.drone = drone
     self._cf = drone._cf
