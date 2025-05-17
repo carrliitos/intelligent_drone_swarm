@@ -26,13 +26,15 @@ def get_latest_csv(path):
   return max(files, key=os.path.getctime)
 
 # Prepare figure with 2 subplots: left = 3D, right = PID lines
-fig = plt.figure(figsize=(14, 8))
+fig = plt.figure(figsize=(14, 12))
 # Top row: 3D on left, PID on right
-ax3d = plt.subplot2grid((2, 2), (0, 0), projection='3d')
-axpid = plt.subplot2grid((2, 2), (0, 1))
-# Bottom row: thrust on left, battery on right
-axthrust = plt.subplot2grid((2, 2), (1, 0))
-axbattery = plt.subplot2grid((2, 2), (1, 1))
+ax3d = plt.subplot2grid((3, 2), (0, 0), projection='3d')
+axpid = plt.subplot2grid((3, 2), (0, 1))
+# Second row: thrust on left, battery on right
+axthrust = plt.subplot2grid((3, 2), (1, 0))
+axbattery = plt.subplot2grid((3, 2), (1, 1))
+# Third row for motors
+axmotors = plt.subplot2grid((3, 2), (2, 0), colspan=2)
 
 def animate(i):
   try:
@@ -59,6 +61,7 @@ def animate(i):
     axpid.clear()
     axthrust.clear()
     axbattery.clear()
+    axmotors.clear()
 
     # Plot 3D GYRO Path
     ax3d.xaxis.set_major_locator(MaxNLocator(nbins=5))
@@ -108,12 +111,25 @@ def animate(i):
     else:
       axbattery.set_title("No 'pm_batteryLevel' or 'timestamp' column in telemetry log.")
 
+    # Bar Plot for Motor Values
+    latest = gyro_df.iloc[-1] if not gyro_df.empty else None
+    if latest is not None and all(k in latest for k in ["motor_m1", "motor_m2", "motor_m3", "motor_m4"]):
+      motor_labels = ["M1", "M2", "M3", "M4"]
+      motor_values = [latest["motor_m1"], latest["motor_m2"], latest["motor_m3"], latest["motor_m4"]]
+      axmotors.bar(motor_labels, motor_values, color=["red", "green", "blue", "orange"])
+      axmotors.set_ylim(0, max(50000, max(motor_values) * 1.1))
+      axmotors.set_title("Motor Output Levels")
+      axmotors.set_ylabel("PWM Value")
+      axmotors.grid(True)
+    else:
+      axmotors.set_title("Motor data unavailable")
+
   except Exception as e:
     print(f"[Plot Error] {e}")
 
 ani = animation.FuncAnimation(fig, animate, interval=100)
 plt.tight_layout()
-fig.subplots_adjust(top=0.978, bottom=0.126, left=0.065, right=0.989, hspace=0.348, wspace=0.103)
+fig.subplots_adjust(top=0.97, bottom=0.06, left=0.06, right=0.98, hspace=0.45, wspace=0.3)
 plt.show()
 fig.savefig(FIG_SAVE_PATH)
 print(f"Saved combined plot to {FIG_SAVE_PATH}")

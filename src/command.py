@@ -17,6 +17,7 @@ logger = logger.setup_logger(logger_name, f"{directory}/logs/{logger_file_name}.
 class Command:
   def __init__(self, 
                drone: UDPConnection, 
+               drone_udp: str,
                drone_logger: DroneLogs,
                thrust_start: int, 
                thrust_limit: int, 
@@ -26,6 +27,7 @@ class Command:
     Handles gradual thrust commands for the drone.
 
     :param drone: Instance of UDPConnection.
+    :param drone_udp: Drone UDP string.
     :param drone_logger: Instance of DroneLogs.
     :param thrust_start: Initial thrust value.
     :param thrust_limit: Maximum thrust value.
@@ -33,6 +35,7 @@ class Command:
     :param thrust_delay: Delay between thrust updates.
     """
     self.drone = drone
+    self.drone_udp = drone_udp
     self.drone_logger = drone_logger
     self.thrust_start = thrust_start
     self.thrust_limit = thrust_limit
@@ -125,9 +128,13 @@ class Command:
 
   def pygame(self):
     """
-      Roll = a circular (clockwise or anticlockwise) movement of the body as it moves forward.
-      Pitch = nose up or tail up.
-      Yaw = nose moves from side to side.
+    Interactive PyGame controller for ESP32 drone thrust and orientation.
+    Keys:
+      W/S         -> Increase/Decrease Thrust
+      ←/→ (Arrow keys)  -> Roll Left/Right
+      ↑/↓ (Arrow keys)  -> Pitch Up/Down
+      A/D     -> Yaw Left/Right
+      Backspace     -> Exit control loop
     """
     done = False
     thrust = self.thrust_start
@@ -136,9 +143,10 @@ class Command:
     yaw = 0.0
 
     logger.info("In pygame function")
-    screen = pygame.display.set_mode((277, 638))
-    pygame.joystick.init()
-    logger.debug(f"Joystick count: {pygame.joystick.get_count()}")
+    pygame.init()
+    screen = pygame.display.set_mode((600, 600))
+    pygame.display.set_caption("ESP32-Drone Flight Controls")
+    font = pygame.font.SysFont("monospace", 16)
 
     try:
       while not done:
@@ -146,12 +154,8 @@ class Command:
           if event.type == pygame.QUIT:
             pygame.quit()
             exit()
-
-          if event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_BACKSPACE:
-              done = True
-
-          logger.info(f"roll={roll}, pitch={pitch}, yaw={yaw}, thrust={thrust}")
+          if event.type == pygame.KEYDOWN and event.key == pygame.K_BACKSPACE:
+            done = True
 
         keys = pygame.key.get_pressed()
         mods = pygame.key.get_mods()
@@ -162,35 +166,56 @@ class Command:
           thrust = max(self.thrust_start, thrust - self.thrust_step)
 
         if keys[pygame.K_LEFT]:
-          roll_rate = -0.001
-          roll += roll_rate
+          roll += -0.001
         if keys[pygame.K_RIGHT]:
-          roll_rate = 0.001
-          roll += roll_rate
+          roll += 0.001
 
         if keys[pygame.K_UP]:
-          pitch_rate = 0.05
-          pitch += pitch_rate
+          pitch += 0.05
         if keys[pygame.K_DOWN]:
-          pitch_rate = -0.05
-          pitch += pitch_rate
+          pitch += -0.05
 
-        if (mods & pygame.KMOD_SHIFT) and keys[pygame.K_LEFT]:
-          yaw_rate = -0.001
-          yaw += yaw_rate
-        if (mods & pygame.KMOD_SHIFT) and keys[pygame.K_RIGHT]:
-          yaw_rate = 0.001
-          yaw += yaw_rate
+        if keys[pygame.K_a]:
+          yaw += -0.001
+        if keys[pygame.K_d]:
+          yaw += 0.001
 
         self.drone._cf.commander.send_setpoint(roll, pitch, yaw, thrust)
+        screen.fill((0, 0, 0))
+
+        instructions = [
+          "ESP32 Drone Control",
+          "=======================================",
+          "W/S         | Increase/Decrease Thrust",
+          "←/→         | Roll Left/Right",
+          "↑/↓         | Pitch Up/Down",
+          "A/D         | Yaw Left/Right",
+          "Backspace   | Exit",
+          "",
+          f"Connected to: {self.drone_udp}",
+          f"Current Thrust Limit: {self.thrust_limit}",
+          f"Current Thrust Step: {self.thrust_step}",
+          "",
+          f"Roll   : {roll:.3f}",
+          f"Pitch  : {pitch:.3f}",
+          f"Yaw    : {yaw:.3f}",
+          f"Thrust : {thrust}"
+        ]
+
+        for i, line in enumerate(instructions):
+          text = font.render(line, True, (255, 255, 255))
+          screen.blit(text, (20, 20 + i * 25))
+
+        pygame.display.flip()
         time.sleep(self.thrust_delay)
 
-      pygame.quit()
-
     finally:
-      # Reduce thrust back to 0 gradually
       logger.info("Reducing thrust to 0...")
+      time.sleep(1)
       while thrust >= 0:
         self.drone._cf.commander.send_setpoint(0.0, 0.0, 0.0, thrust)
         thrust -= int(self.thrust_step / 2)
+
         time.sleep(self.thrust_delay)
+      pygame.quit()
+
