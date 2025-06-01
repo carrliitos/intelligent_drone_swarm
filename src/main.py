@@ -66,6 +66,8 @@ if __name__ == '__main__':
       connection_type = RADIO7
     elif sys.argv[2] == "8":
       connection_type = RADIO8
+    elif sys.argv[2] == "9":
+      connection_type = RADIO9
   else:
     logger.error("Invalid argument.")
 
