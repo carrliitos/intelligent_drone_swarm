@@ -55,6 +55,7 @@ if __name__ == '__main__':
   UDP = "udp://192.168.43.51:2390"
   RADIO7 = "radio://0/80/2M/E7E7E7E7E7"
   RADIO8 = "radio://0/80/2M/E7E7E7E7E8"
+  RADIO9 = "radio://0/80/2M/E7E7E7E7E9"
 
   logger.info(f"Connection type: {arg}")
   
