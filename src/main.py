@@ -53,14 +53,18 @@ if __name__ == '__main__':
   arg = sys.argv[1]
   connection_type = None
   UDP = "udp://192.168.43.51:2390"
-  RADIO = None
+  RADIO7 = "radio://0/80/2M/E7E7E7E7E7"
+  RADIO8 = "radio://0/80/2M/E7E7E7E7E8"
 
   logger.info(f"Connection type: {arg}")
   
   if arg == "udp":
     connection_type = UDP
   elif arg == "radio":
-    connection_type = RADIO
+    if sys.argv[2] == "7":
+      connection_type = RADIO7
+    elif sys.argv[2] == "8":
+      connection_type = RADIO8
   else:
     logger.error("Invalid argument.")
 
