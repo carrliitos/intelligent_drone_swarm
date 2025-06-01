@@ -8,7 +8,7 @@ blinker==1.4
 Brlapi==0.8.3
 certifi==2020.6.20
 cfclient==2025.2
-cflib @ git+https://github.com/leeebo/crazyflie-lib-python.git@a430283a3b608db7c0b3227aa37d7120858c25ef
+cflib==0.1.28
 chardet==4.0.0
 chrome-gnome-shell==0.0.0
 click==8.0.3
@@ -22,6 +22,7 @@ cycler==0.12.1
 dbus-python==1.2.18
 defer==1.0.6
 Deprecated==1.2.18
+deprecation==2.1.0
 distlib==0.3.4
 distro==1.7.0
 distro-info==1.1+ubuntu0.2
