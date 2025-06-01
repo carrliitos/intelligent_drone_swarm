@@ -84,7 +84,6 @@ ptyprocess==0.7.0
 py==1.10.0
 pyaes==1.6.1
 pycairo==1.20.1
-pycrypto==2.6.1
 pycups==2.0.1
 pygame==2.6.1
 Pygments==2.11.2
