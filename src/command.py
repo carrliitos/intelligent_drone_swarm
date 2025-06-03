@@ -7,7 +7,6 @@ from pathlib import Path
 from utils import logger, context
 from drone_connection import DroneConnection
 from drone_log import DroneLogs
-from pid_controller import PIDController
 
 directory = context.get_context(os.path.abspath(__file__))
 logger_file_name = Path(directory).stem
