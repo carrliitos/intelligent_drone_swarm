@@ -7,8 +7,9 @@ from pathlib import Path
 
 from utils import logger, context
 
-import cflib
+import cflib.crtp
 from cflib.crazyflie import Crazyflie
+from cflib.crazyflie.syncCrazyflie import SyncCrazyflie
 
 directory = context.get_context(os.path.abspath(__file__))
 logger_name = Path(__file__).stem
@@ -16,8 +17,11 @@ logger = logger.setup_logger(logger_name, f"{directory}/logs/{logger_name}.log")
 
 class DroneConnection:
   def __init__(self, link_uri):
+    cflib.crtp.init_drivers()
+
     self.link_uri = link_uri
-    self._cf = Crazyflie(rw_cache='./cache')
+    self._scf = SyncCrazyflie(self.link_uri, cf=Crazyflie(rw_cache='./cache'))
+    self._cf = self._scf.cf
     self.timer = None
 
     # Register connection callbacks
