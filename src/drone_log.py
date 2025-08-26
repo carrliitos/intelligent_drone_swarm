@@ -29,6 +29,11 @@ class DroneLogs:
     self.battery_log_config = None
     self.gyro_log_config = None
     self.control_log_config = None
+    self.stateEstimate_log_config = None
+    self.pid_rate_roll_log_config = None
+    self.pid_rate_pitch_log_config = None
+    self.pid_rate_yaw_log_config = None
+    self.motor_log_config = None
 
     self.lock = threading.Lock()
 
@@ -55,6 +60,10 @@ class DroneLogs:
     self.pid_rate__yaw_outI = 0
     self.pid_rate__yaw_outD = 0
 
+    self.stateEstimate_x = 0.0
+    self.stateEstimate_y = 0.0
+    self.stateEstimate_z = 0.0
+
     self._write_logs()
 
   def _write_logs(self):
@@ -67,6 +76,7 @@ class DroneLogs:
     columns = [
         "timestamp",
         "thrust", "roll", "pitch", "yaw",
+        "stateEstimate_x", "stateEstimate_y", "stateEstimate_z",
         "gyro_x", "gyro_y", "gyro_z",
         "pm_vbatMV", "pm_batteryLevel",
         "motor_m1", "motor_m2", "motor_m3", "motor_m4",
@@ -84,6 +94,7 @@ class DroneLogs:
           row = [
               time.time(),
               self.thrust, self.roll, self.pitch, self.yaw,
+              self.stateEstimate_x, self.stateEstimate_y, self.stateEstimate_z,
               self.gyro_x, self.gyro_y, self.gyro_z,
               self.pm_vbatMV, self.pm_batteryLevel,
               self.motor_m1, self.motor_m2, self.motor_m3, self.motor_m4,
@@ -123,14 +134,16 @@ class DroneLogs:
     pid_rate_roll_logs = threading.Thread(target=self._pid_rate_roll, daemon=True)
     pid_rate_pitch_logs = threading.Thread(target=self._pid_rate_pitch, daemon=True)
     pid_rate_yaw_logs = threading.Thread(target=self._pid_rate_yaw, daemon=True)
+    state_estimates_logs = threading.Thread(target=self._stateEstimate, daemon=True)
 
     battery_logs.start()
-    gyro_states_logs.start()
-    controller_logs.start()
-    motor_logs.start()
-    pid_rate_roll_logs.start()
-    pid_rate_pitch_logs.start()
-    pid_rate_yaw_logs.start()
+    # gyro_states_logs.start()
+    # controller_logs.start()
+    # motor_logs.start()
+    # pid_rate_roll_logs.start()
+    # pid_rate_pitch_logs.start()
+    # pid_rate_yaw_logs.start()
+    state_estimates_logs.start()
 
   def stop_logging(self):
     """
@@ -145,22 +158,32 @@ class DroneLogs:
       self.gyro_log_config.stop()
     if self.control_log_config and self.control_log_config.valid:
       self.control_log_config.stop()
+    if self.stateEstimate_log_config and self.stateEstimate_log_config.valid:
+      self.stateEstimate_log_config.stop()
+    if self.pid_rate_roll_log_config and self.pid_rate_roll_log_config.valid:
+      self.pid_rate_roll_log_config.stop()
+    if self.pid_rate_pitch_log_config and self.pid_rate_pitch_log_config.valid:
+      self.pid_rate_pitch_log_config.stop()
+    if self.pid_rate_yaw_log_config and self.pid_rate_yaw_log_config.valid:
+      self.pid_rate_yaw_log_config.stop()
+    if self.motor_log_config and self.motor_log_config.valid:
+      self.motor_log_config.stop()
 
-  def _pid_rate_roll(self):
+  def _stateEstimate(self):
     """
     Log PID Roll Rates.
     """
-    self.pid_rate_log_config = LogConfig(name="pid_rate", period_in_ms=500)
+    self.stateEstimate_log_config = LogConfig(name="stateEstimate", period_in_ms=500)
 
     try:
-      self.pid_rate_log_config.add_variable("pid_rate.roll_outP", "float")
-      self.pid_rate_log_config.add_variable("pid_rate.roll_outI", "float")
-      self.pid_rate_log_config.add_variable("pid_rate.roll_outD", "float")
+      self.stateEstimate_log_config.add_variable("stateEstimate.x", "float")
+      self.stateEstimate_log_config.add_variable("stateEstimate.y", "float")
+      self.stateEstimate_log_config.add_variable("stateEstimate.z", "float")
 
-      self._cf.log.add_config(self.pid_rate_log_config)
-      self.pid_rate_log_config.data_received_cb.add_callback(self._log_callback__pid_rate_roll)
-      self.pid_rate_log_config.error_cb.add_callback(self._log_error_callback)
-      self.pid_rate_log_config.start()
+      self._cf.log.add_config(self.stateEstimate_log_config)
+      self.stateEstimate_log_config.data_received_cb.add_callback(self._log_callback__stateEstimate)
+      self.stateEstimate_log_config.error_cb.add_callback(self._log_error_callback)
+      self.stateEstimate_log_config.start()
 
       # Keep logging until the stop event is triggered
       while self._cf and self._cf.state != 0 and not self._stop_event.is_set():
@@ -169,25 +192,52 @@ class DroneLogs:
     except Exception as e:
       logger.error(f"Unexpected error: {e}")
     finally:
-      if self.pid_rate_log_config and self.pid_rate_log_config.valid:
-        self.pid_rate_log_config.stop()
+      if self.stateEstimate_log_config and self.stateEstimate_log_config.valid:
+        self.stateEstimate_log_config.stop()
+        logger.info("Stopped stateEstimate logging.")
+
+  def _pid_rate_roll(self):
+    """
+    Log PID Roll Rates.
+    """
+    self.pid_rate_roll_log_config = LogConfig(name="pid_rate", period_in_ms=500)
+
+    try:
+      self.pid_rate_roll_log_config.add_variable("pid_rate.roll_outP", "float")
+      self.pid_rate_roll_log_config.add_variable("pid_rate.roll_outI", "float")
+      self.pid_rate_roll_log_config.add_variable("pid_rate.roll_outD", "float")
+
+      self._cf.log.add_config(self.pid_rate_roll_log_config)
+      self.pid_rate_roll_log_config.data_received_cb.add_callback(self._log_callback__pid_rate_roll)
+      self.pid_rate_roll_log_config.error_cb.add_callback(self._log_error_callback)
+      self.pid_rate_roll_log_config.start()
+
+      # Keep logging until the stop event is triggered
+      while self._cf and self._cf.state != 0 and not self._stop_event.is_set():
+        time.sleep(1)
+
+    except Exception as e:
+      logger.error(f"Unexpected error: {e}")
+    finally:
+      if self.pid_rate_roll_log_config and self.pid_rate_roll_log_config.valid:
+        self.pid_rate_roll_log_config.stop()
         logger.info("Stopped pid_rate logging.")
 
   def _pid_rate_pitch(self):
     """
     Log PID pitch Rates.
     """
-    self.pid_rate_log_config = LogConfig(name="pid_rate", period_in_ms=500)
+    self.pid_rate_pitch_log_config = LogConfig(name="pid_rate", period_in_ms=500)
 
     try:
-      self.pid_rate_log_config.add_variable("pid_rate.pitch_outP", "float")
-      self.pid_rate_log_config.add_variable("pid_rate.pitch_outI", "float")
-      self.pid_rate_log_config.add_variable("pid_rate.pitch_outD", "float")
+      self.pid_rate_pitch_log_config.add_variable("pid_rate.pitch_outP", "float")
+      self.pid_rate_pitch_log_config.add_variable("pid_rate.pitch_outI", "float")
+      self.pid_rate_pitch_log_config.add_variable("pid_rate.pitch_outD", "float")
 
-      self._cf.log.add_config(self.pid_rate_log_config)
-      self.pid_rate_log_config.data_received_cb.add_callback(self._log_callback__pid_rate_pitch)
-      self.pid_rate_log_config.error_cb.add_callback(self._log_error_callback)
-      self.pid_rate_log_config.start()
+      self._cf.log.add_config(self.pid_rate_pitch_log_config)
+      self.pid_rate_pitch_log_config.data_received_cb.add_callback(self._log_callback__pid_rate_pitch)
+      self.pid_rate_pitch_log_config.error_cb.add_callback(self._log_error_callback)
+      self.pid_rate_pitch_log_config.start()
 
       # Keep logging until the stop event is triggered
       while self._cf and self._cf.state != 0 and not self._stop_event.is_set():
@@ -196,25 +246,25 @@ class DroneLogs:
     except Exception as e:
       logger.error(f"Unexpected error: {e}")
     finally:
-      if self.pid_rate_log_config and self.pid_rate_log_config.valid:
-        self.pid_rate_log_config.stop()
+      if self.pid_rate_pitch_log_config and self.pid_rate_pitch_log_config.valid:
+        self.pid_rate_pitch_log_config.stop()
         logger.info("Stopped pid_rate logging.")
 
   def _pid_rate_yaw(self):
     """
     Log PID yaw Rates.
     """
-    self.pid_rate_log_config = LogConfig(name="pid_rate", period_in_ms=500)
+    self.pid_rate_yaw_log_config = LogConfig(name="pid_rate", period_in_ms=500)
 
     try:
-      self.pid_rate_log_config.add_variable("pid_rate.yaw_outP", "float")
-      self.pid_rate_log_config.add_variable("pid_rate.yaw_outI", "float")
-      self.pid_rate_log_config.add_variable("pid_rate.yaw_outD", "float")
+      self.pid_rate_yaw_log_config.add_variable("pid_rate.yaw_outP", "float")
+      self.pid_rate_yaw_log_config.add_variable("pid_rate.yaw_outI", "float")
+      self.pid_rate_yaw_log_config.add_variable("pid_rate.yaw_outD", "float")
 
-      self._cf.log.add_config(self.pid_rate_log_config)
-      self.pid_rate_log_config.data_received_cb.add_callback(self._log_callback__pid_rate_yaw)
-      self.pid_rate_log_config.error_cb.add_callback(self._log_error_callback)
-      self.pid_rate_log_config.start()
+      self._cf.log.add_config(self.pid_rate_yaw_log_config)
+      self.pid_rate_yaw_log_config.data_received_cb.add_callback(self._log_callback__pid_rate_yaw)
+      self.pid_rate_yaw_log_config.error_cb.add_callback(self._log_error_callback)
+      self.pid_rate_yaw_log_config.start()
 
       # Keep logging until the stop event is triggered
       while self._cf and self._cf.state != 0 and not self._stop_event.is_set():
@@ -223,8 +273,8 @@ class DroneLogs:
     except Exception as e:
       logger.error(f"Unexpected error: {e}")
     finally:
-      if self.pid_rate_log_config and self.pid_rate_log_config.valid:
-        self.pid_rate_log_config.stop()
+      if self.pid_rate_yaw_log_config and self.pid_rate_yaw_log_config.valid:
+        self.pid_rate_yaw_log_config.stop()
         logger.info("Stopped pid_rate logging.")
 
   def _motor_states(self):
@@ -336,6 +386,15 @@ class DroneLogs:
         self.battery_log_config.stop()
         logger.info("Stopped battery logging.")
 
+  def _log_callback__stateEstimate(self, timestamp, data, logconf):
+    """ Callback for PID rates data. """
+    with self.lock:
+      self.stateEstimate_x = data["stateEstimate.x"]
+      self.stateEstimate_x = data["stateEstimate.x"]
+      self.stateEstimate_x = data["stateEstimate.x"]
+
+    logger.info(f"Timestamp: {timestamp}, Data: {data}")
+
   def _log_callback__pid_rate_roll(self, timestamp, data, logconf):
     """ Callback for PID rates data. """
     with self.lock:
@@ -343,7 +402,7 @@ class DroneLogs:
       self.pid_rate__roll_outI = data["pid_rate.roll_outI"]
       self.pid_rate__roll_outD = data["pid_rate.roll_outD"]
 
-    # logger.info(f"Timestamp: {timestamp}, Data: {data}")
+    logger.info(f"Timestamp: {timestamp}, Data: {data}")
 
   def _log_callback__pid_rate_pitch(self, timestamp, data, logconf):
     """ Callback for PID rates data. """
@@ -352,7 +411,7 @@ class DroneLogs:
       self.pid_rate__pitch_outI = data["pid_rate.pitch_outI"]
       self.pid_rate__pitch_outD = data["pid_rate.pitch_outD"]
 
-    # logger.info(f"Timestamp: {timestamp}, Data: {data}")
+    logger.info(f"Timestamp: {timestamp}, Data: {data}")
 
   def _log_callback__pid_rate_yaw(self, timestamp, data, logconf):
     """ Callback for PID rates data. """
@@ -361,7 +420,7 @@ class DroneLogs:
       self.pid_rate__yaw_outI = data["pid_rate.yaw_outI"]
       self.pid_rate__yaw_outD = data["pid_rate.yaw_outD"]
 
-    # logger.info(f"Timestamp: {timestamp}, Data: {data}")
+    logger.info(f"Timestamp: {timestamp}, Data: {data}")
 
   def _log_callback__motor(self, timestamp, data, logconf):
     """ Callback for motor data. """
@@ -371,7 +430,7 @@ class DroneLogs:
       self.motor_m3 = data["motor.m3"]
       self.motor_m4 = data["motor.m4"]
 
-    # logger.info(f"Timestamp: {timestamp}, Data: {data}")
+    logger.info(f"Timestamp: {timestamp}, Data: {data}")
 
   def _log_callback__gyro(self, timestamp, data, logconf):
     """ Callback for gyro data. """
@@ -380,7 +439,7 @@ class DroneLogs:
       self.gyro_y = data["gyro.y"]
       self.gyro_z = data["gyro.z"]
 
-    # logger.info(f"Timestamp: {timestamp}, Data: {data}")
+    logger.info(f"Timestamp: {timestamp}, Data: {data}")
 
   def _log_callback__controller(self, timestamp, data, logconf):
     """ Callback for controller data. """
@@ -390,7 +449,7 @@ class DroneLogs:
       self.pitch = data["stateEstimateZ.ratePitch"]
       self.yaw = data["stateEstimateZ.rateYaw"]
 
-    # logger.info(f"Timestamp: {timestamp}, Data: {data}")
+    logger.info(f"Timestamp: {timestamp}, Data: {data}")
 
   def _log_callback__power(self, timestamp, data, logconf):
     """ Callback for power management data. """
@@ -398,7 +457,7 @@ class DroneLogs:
       self.pm_vbatMV = data["pm.vbatMV"]
       self.pm_batteryLevel = data["pm.batteryLevel"]
 
-    # logger.info(f"Timestamp: {timestamp}, Data: {data}")
+    logger.info(f"Timestamp: {timestamp}, Data: {data}")
 
   def _log_error_callback(self, logconf, msg):
     """
@@ -433,3 +492,15 @@ class DroneLogs:
   def get_gyro_z(self):
     with self.lock:
       return self.gyro_z
+
+  def get_stateEstimate_x(self):
+    with self.lock:
+      return self.stateEstimate_x
+
+  def get_stateEstimate_y(self):
+    with self.lock:
+      return self.stateEstimate_y
+
+  def get_stateEstimate_z(self):
+    with self.lock:
+      return self.stateEstimate_z

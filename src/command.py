@@ -7,7 +7,6 @@ from pathlib import Path
 from utils import logger, context
 from drone_connection import DroneConnection
 from drone_log import DroneLogs
-from pid_controller import PIDController
 
 directory = context.get_context(os.path.abspath(__file__))
 logger_file_name = Path(directory).stem
@@ -80,6 +79,29 @@ class Command:
       self.drone._cf.commander.send_setpoint(0.0, 0.0, 0.0, 0)  # Ensure drone stops safely
       logger.info("Thrust set to 0 for safety.")
 
+  def _hover(self):
+    try:
+      for y in range(10):
+        self.drone._cf.commander.send_hover_setpoint(0, 0, 0, y / 25)
+        time.sleep(self.thrust_delay)
+
+      hold_time = 5 # seconds
+      logger.info(f"Holding max thrust for {hold_time}s...")
+      start_time = time.time()
+      while (time.time() - start_time) < hold_time:
+        self.drone._cf.commander.send_hover_setpoint(0.0, 0.0, 0.0, 0.8)
+        time.sleep(self.thrust_delay)
+
+      for y in range(10):
+        self.drone._cf.commander.send_hover_setpoint(0, 0, 0, (10 - y) / 25)
+        time.sleep(self.thrust_delay)
+    except:
+      logger.debug("Thrust control interrupted by user.")
+    finally:
+      self.drone._cf.commander.send_stop_setpoint()  # Ensure drone stops safely
+      self.drone._cf.commander.send_notify_setpoint_stop()
+      logger.info("Drone flight stopped.")
+
   def pygame(self):
     """
     Interactive PyGame controller for drone thrust and orientation.
@@ -130,6 +152,8 @@ class Command:
 
         if keys[pygame.K_SPACE]:
           self._let_it_fly(thrust, self.thrust_limit)
+        if keys[pygame.K_h]:
+          self._hover()
 
         self.drone._cf.commander.send_setpoint(roll, pitch, yaw, thrust)
         screen.fill((0, 0, 0))
@@ -141,8 +165,9 @@ class Command:
           "←/→         | Roll Left/Right",
           "↑/↓         | Pitch Up/Down",
           "A/D         | Yaw Left/Right",
-          "Backspace   | Exit",
+          "H           | Hover.",
           "Spacebar    | Just let it fly, man.",
+          "Backspace   | Exit",
           "",
           f"Current Thrust Limit: {self.thrust_limit}",
           f"Current Thrust Step: {self.thrust_step}",
@@ -168,5 +193,8 @@ class Command:
         thrust -= int(self.thrust_step / 2)
 
         time.sleep(self.thrust_delay)
+
+      self.drone._cf.commander.send_stop_setpoint()
+      self.drone._cf.commander.send_notify_setpoint_stop()
       pygame.quit()
 
