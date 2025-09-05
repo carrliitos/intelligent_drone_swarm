@@ -73,13 +73,14 @@ class Command:
     self._flow_ready()
     cf = self.drone._cf
     logger.info(f"Taking off to {height:.2f} m and hovering for {hold_s:.1f}s...")
+    
+    mc = MotionCommander(cf)
     try:
-      with MotionCommander(cf, default_height=height) as mc:
-        t0 = time.time()
-        while (time.time() - t0) < hold_s:
-          # Nothing to do — MC keeps altitude; just keep the loop alive
-          time.sleep(0.05)
+      mc.take_off(height=height, velocity=0.4)
+      time.sleep(hold_s)
     finally:
+      mc.land()
+      mc.stop()
       logger.info("Hover complete (landed).")
 
   def pygame(self,
