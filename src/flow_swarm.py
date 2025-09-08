@@ -10,12 +10,12 @@ from cflib.positioning.motion_commander import MotionCommander
 WINDOW = 10
 PERIOD_MS = 500
 THRESHOLD = 0.001
-MAX_WAIT_SEC = 6.0  # hard cap per CF
+MAX_WAIT_SEC = 10.0  # hard cap per CF
 
 uris = {
   'radio://0/80/2M/E7E7E7E7E7',
-  'radio://0/80/2M/E7E7E7E7E8',
-  'radio://0/80/2M/E7E7E7E7E9',
+  # 'radio://0/80/2M/E7E7E7E7E8',
+  # 'radio://0/80/2M/E7E7E7E7E9',
 }
 
 def wait_for_param_download(scf):
@@ -64,7 +64,7 @@ def reset_estimator(scf):
   cf.param.set_value('stabilizer.estimator', '2')
   try:
     flow = cf.param.get_value('deck.bcFlow2')
-    print(f"Flow deck detected: {flow}")
+    print(f"{scf.cf.link_uri}: Flow deck detected: {flow}")
   except Exception:
     pass
 
@@ -79,39 +79,58 @@ def arm(scf):
   scf.cf.platform.send_arming_request(True)
   time.sleep(1.0)
 
-def _thrust_test(scf):
-  print(f"Thrust test for {scf.cf.link_uri}")
-  time.sleep(2)
-  test_delay = 0.01
-  for _ in range(100):
-    scf.cf.commander.send_setpoint(0, 0, 0, 15000)
-    time.sleep(test_delay)
+def _thrust_test(scf, start=20000, peak=30000, step=2000, hold_s=0.5, rate_hz=100):
+  """
+  Safely ramps motor thrust and holds at each step.
+  Use with props OFF or the drone firmly restrained.
+  """
+  cf = scf.cf
+  dt = 1.0 / rate_hz
 
-  scf.cf.commander.send_setpoint(0, 0, 0, 0)
-  time.sleep(2)
-  print(f"Thrust test complete for {scf.cf.link_uri}!")
+  # Send a couple of zero setpoints to (a) wake the commander and (b) clear any latch
+  for _ in range(int(0.2 / dt)):
+    cf.commander.send_setpoint(0, 0, 0, 0)
+    time.sleep(dt)
 
-def activate_led_bit_mask(scf):
-  scf.cf.param.set_value('led.bitmask', 255)
+  print(f"[{cf.link_uri}] Thrust test: {start}→{peak} (step {step})")
 
-def deactivate_led_bit_mask(scf):
-  scf.cf.param.set_value('led.bitmask', 0)
+  # Ramp up in steps
+  thrust = start
+  while thrust <= peak:
+    t_end = time.time() + hold_s
+    print(f"  Holding thrust={thrust}")
+    while time.time() < t_end:
+      cf.commander.send_setpoint(0, 0, 0, thrust)
+      time.sleep(dt)
+    thrust += step
 
-def light_check(scf):
+  # Back to zero and send a stop setpoint to cleanly disarm motors
+  for _ in range(int(0.3 / dt)):
+    cf.commander.send_setpoint(0, 0, 0, 0)
+    time.sleep(dt)
+  cf.commander.send_stop_setpoint()
+
+  print(f"[{cf.link_uri}] Thrust test complete.")
+
+def light_check(scf, delay=0.1):
   print("Light check!")
   time.sleep(1)
 
-  activate_led_bit_mask(scf)
-  time.sleep(2)
-  deactivate_led_bit_mask(scf)
-  time.sleep(2)
+  GREEN = 138
+
+  for _ in range(10):
+    scf.cf.param.set_value('led.bitmask', GREEN)
+    time.sleep(delay)
+    scf.cf.param.set_value('led.bitmask', 0)
+    time.sleep(delay)
+    scf.cf.param.set_value('sound.effect', 100)
 
 def go(scf):
   mc = MotionCommander(scf)
 
   try:
     mc.take_off(0.5, velocity=0.4)
-    time.sleep(20.0)
+    time.sleep(2.0)
 
     mc.up(0.5, 1.0)
     time.sleep(2.0)
@@ -149,9 +168,6 @@ if __name__ == '__main__':
       swarm.parallel_safe(light_check)
       time.sleep(1)
 
-      swarm.parallel_safe(_thrust_test)
-      time.sleep(1)
-
-      swarm.parallel_safe(go)
+      # swarm.parallel_safe(go)
     finally:
       swarm.close_links()
