@@ -40,8 +40,7 @@ class DroneConnection:
     Callback triggered when the Crazyflie successfully connects.
     """
 
-    # Start the idle loop.
-    Thread(target=self._idle, daemon=True).start()
+    logger.info(f"Connected to {link_uri}.")
 
   def _disconnected(self, link_uri):
     """
@@ -61,43 +60,34 @@ class DroneConnection:
     """
     logger.error(f"Connection to {link_uri} lost: {msg}")
 
-  def _start_timer(self):
-    """Starts a recurring timer to send idle commands to the drone."""
-    self._stop_timer()  # Ensure no duplicate timers
-    self.timer = threading.Timer(0.05, self._idle)
-    self.timer.start()
-
-  def _stop_timer(self):
-    """Stops the active timer if it exists."""
-    if self.timer:
-      self.timer.cancel()
-      self.timer = None
-
-  def _idle(self):
-    """Sends a zero-setpoint command to keep the Crazyflie active."""
-    self._cf.commander.send_setpoint(0, 0, 0, 0)
-    self._start_timer()  # Restart for continuous updates
-
   def connect(self):
     """
     Establishes a connection to the Crazyflie, ensuring the connection is active.
     """
     try:
-      self._thrust_test()
-      self._connected(self.link_uri)
-      return self._cf.state
+      self._light_check()
+      self._arm()
     except Exception as e:
       logger.error(f"Error during connection attempt: {e}")
       sys.exit(1)
 
-  def _thrust_test(self):
-    logger.info("Thrust test...")
-    time.sleep(2)
-    test_delay = 0.01
-    for _ in range(100):
-      self._cf.commander.send_setpoint(0, 0, 0, 15000)
-      time.sleep(test_delay)
+  def _arm(self):
+    self._cf.platform.send_arming_request(True)
+    logger.info("Arming request complete.")
+    time.sleep(1.0)
 
-    self._cf.commander.send_setpoint(0, 0, 0, 0)
-    time.sleep(2)
-    logger.info("Thrust test complete.")
+  def _light_check(self, delay=0.1):
+    logger.info("Light check!")
+    time.sleep(1.0)
+
+    GREEN = 138
+
+    for _ in range(20):
+      self._cf.param.set_value('led.bitmask', GREEN)
+      time.sleep(delay)
+      self._cf.param.set_value('led.bitmask', 0)
+      time.sleep(delay)
+      self._cf.param.set_value('sound.effect', 100)
+
+    logger.info("Light check complete.")
+    time.sleep(1.0)
