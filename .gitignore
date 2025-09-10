@@ -9,6 +9,9 @@ data/*.csv
 data/figs/*.png
 !data/figs/.gitkeep
 
+docs/*
+!docs/.gitkeep
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

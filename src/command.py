@@ -4,6 +4,10 @@ import pandas as pd
 import pygame
 from pathlib import Path
 
+from cflib.crazyflie.log import LogConfig
+from cflib.crazyflie.syncLogger import SyncLogger
+from cflib.positioning.motion_commander import MotionCommander
+
 from utils import logger, context
 from drone_connection import DroneConnection
 from drone_log import DroneLogs
@@ -14,103 +18,178 @@ logger_name = Path(__file__).stem
 logger = logger.setup_logger(logger_name, f"{directory}/logs/{logger_file_name}.log")
 
 class Command:
-  def __init__(self, 
-               drone: DroneConnection, 
-               conn_str: str,
-               drone_logger: DroneLogs,
-               thrust_start: int, 
-               thrust_limit: int, 
-               thrust_step: int, 
-               thrust_delay: float):
+  def __init__(self, drone: DroneConnection, drone_logger: DroneLogs):
     """
-    Handles gradual thrust commands for the drone.
+    Handles thrust commands for the drone.
 
     :param drone: Instance of DroneConnection.
-    :param conn_str: Drone connection string.
     :param drone_logger: Instance of DroneLogs.
-    :param thrust_start: Initial thrust value.
-    :param thrust_limit: Maximum thrust value.
-    :param thrust_step: Step increment for thrust increase.
-    :param thrust_delay: Delay between thrust updates.
     """
     self.drone = drone
-    self.conn_str = conn_str
+    self.scf = drone._scf # SyncCrazyflie
     self.drone_logger = drone_logger
-    self.thrust_start = thrust_start
-    self.thrust_limit = thrust_limit
-    self.thrust_step = thrust_step
-    self.thrust_delay = thrust_delay
-    self.roll = 0.0
-    self.pitch = 0.0
-    self.yaw = 0.0
 
-  def _let_it_fly(self, current_thrust, limit):
-    """Gradually increases and decreases thrust for testing stability."""
-    thrust = current_thrust
-    max_thrust = limit
+    self.window = 10
+    self.period_ms = 500
+    self.threshold = 0.001
+    self.max_wait_sec = 10.0  # hard cap per CF
+
+    self.mc = None
+    self.manual_active = False
+    self._l_was_down = False     # for 'L' edge detection
+    self._g_was_down = False     # for 'G' edge detection (enter manual)
+    self.speed_xy = 0.25         # m/s
+    self.speed_z  = 0.20         # m/s
+    self.yaw_rate = 90.0         # deg/s
+    self.takeoff_alt = 0.5       # m
+
+  def _wait_for_param_download(self):
+    logger.info("Waiting for parameters to be downloaded.")
+    while not self.drone._cf.param.is_updated:
+      time.sleep(1.0)
+    logger.info(f"Parameters downloaded for {self.drone._cf.link_uri}")
+    time.sleep(2.0)
+
+  def _wait_for_position_estimator(self):
+    cf = self.drone._cf
+    logger.info(f"[{cf.link_uri}] Waiting for estimator to find position...")
+
+    log_config = LogConfig(name='Kalman Variance', period_in_ms=self.period_ms)
+    log_config.add_variable('kalman.varPX', 'float')
+    log_config.add_variable('kalman.varPY', 'float')
+    log_config.add_variable('kalman.varPZ', 'float')
+
+    var_x_history = [1000.0] * self.window
+    var_y_history = [1000.0] * self.window
+    var_z_history = [1000.0] * self.window
+
+    start = time.time()
+    with SyncLogger(self.drone._scf, log_config) as synclogger:
+      for _, data, _ in synclogger:
+        var_x_history.append(float(data['kalman.varPX'])); var_x_history.pop(0)
+        var_y_history.append(float(data['kalman.varPY'])); var_y_history.pop(0)
+        var_z_history.append(float(data['kalman.varPZ'])); var_z_history.pop(0)
+
+        min_x, max_x = min(var_x_history), max(var_x_history)
+        min_y, max_y = min(var_y_history), max(var_y_history)
+        min_z, max_z = min(var_z_history), max(var_z_history)
+
+        if ((max_x - min_x) < self.threshold and
+            (max_y - min_y) < self.threshold and
+            (max_z - min_z) < self.threshold):
+          logger.info(f"[{cf.link_uri}] Estimator stable in {time.time()-start:.2f}s")
+          return True
+
+        if time.time() - start > self.max_wait_sec:
+          logger.info(f"[WARN][{cf.link_uri}] Estimator not stable by {self.max_wait_sec}s "
+                      f"(Δx={max_x-min_x:.4f}, Δy={max_y-min_y:.4f}, Δz={max_z-min_z:.4f})")
+          return False
+
+  def _reset_estimator(self):
+    self._wait_for_param_download()
+
+    cf = self.drone._cf
+    t0 = time.time()
+
+    cf.param.set_value('stabilizer.estimator', '2')  # EKF (Kalman)
+    cf.param.set_value('stabilizer.controller', '1') # PID controller
+    cf.param.set_value('commander.enHighLevel', '1') # High-Level commander on
 
     try:
-      logger.info(f"Gradually increasing thrust to {max_thrust}...")
+      flow = cf.param.get_value('deck.bcFlow2')
+      logger.info(f"{cf.link_uri}: Flow deck detected: {flow}")
+    except Exception:
+      pass
 
-      # Gradually increase thrust
-      while thrust <= max_thrust:
-        self.drone._cf.commander.send_setpoint(0.0, 0.0, 0.0, thrust)
-        thrust += self.thrust_step
-        time.sleep(self.thrust_delay)
+    cf.param.set_value('kalman.resetEstimation', '1')
+    time.sleep(0.1)
+    cf.param.set_value('kalman.resetEstimation', '0')
+    time.sleep(0.4)  # small stillness pause helps
 
-      # Maintain max thrust for a short time
-      hold_time = 5 # seconds
-      logger.info(f"Holding max thrust for {hold_time}s...")
-      start_time = time.time()
-      while (time.time() - start_time) < hold_time:
-        self.drone._cf.commander.send_setpoint(0.0, 0.0, 0.0, max_thrust)
-        time.sleep(self.thrust_delay)
-
-      # Reduce thrust back to 0 gradually
-      logger.info("Reducing thrust to 0...")
-      while thrust >= 0:
-        self.drone._cf.commander.send_setpoint(0.0, 0.0, 0.0, thrust)
-        thrust -= int(self.thrust_step / 2)
-        time.sleep(self.thrust_delay)
-
-    except KeyboardInterrupt:
-      logger.debug("Thrust control interrupted by user.")
-    finally:
-      self.drone._cf.commander.send_setpoint(0.0, 0.0, 0.0, 0)  # Ensure drone stops safely
-      logger.info("Thrust set to 0 for safety.")
+    ok = self._wait_for_position_estimator()
 
   def _hover(self):
+    mc = MotionCommander(self.scf)
+
     try:
-      for y in range(10):
-        self.drone._cf.commander.send_hover_setpoint(0, 0, 0, y / 25)
-        time.sleep(self.thrust_delay)
-
-      hold_time = 5 # seconds
-      logger.info(f"Holding max thrust for {hold_time}s...")
-      start_time = time.time()
-      while (time.time() - start_time) < hold_time:
-        self.drone._cf.commander.send_hover_setpoint(0.0, 0.0, 0.0, 0.8)
-        time.sleep(self.thrust_delay)
-
-      for y in range(10):
-        self.drone._cf.commander.send_hover_setpoint(0, 0, 0, (10 - y) / 25)
-        time.sleep(self.thrust_delay)
-    except:
-      logger.debug("Thrust control interrupted by user.")
+      logger.info("Taking off now!")
+      time.sleep(1.0)
+      mc.take_off(0.5, velocity=1.0)
+      time.sleep(5.0)
     finally:
-      self.drone._cf.commander.send_stop_setpoint()  # Ensure drone stops safely
-      self.drone._cf.commander.send_notify_setpoint_stop()
-      logger.info("Drone flight stopped.")
+      logger.info("Landing...")
+      mc.land()
+
+  def _go(self, keys):
+    """
+    Manual/teleop control, entirely self-contained.
+    Call this every frame with pygame.key.get_pressed().
+    Uses MotionCommander continuously (no low-level setpoints).
+    """
+    g_down = keys[pygame.K_g]
+    if not self.manual_active:
+      if g_down and not self._g_was_down:
+        # First G press == enter manual mode
+        if self.mc is None:
+          self.mc = MotionCommander(self.scf)
+        # If already flying via another mode, this will raise; so only take_off if not flying
+        try:
+          self.mc.take_off(self.takeoff_alt, velocity=0.4)
+        except Exception as e:
+          # Already flying? That's fine; continue.
+          pass
+        self.manual_active = True
+      self._g_was_down = g_down
+      # Not in manual yet, nothing else to do this frame
+      return
+    # Already in manual
+    self._g_was_down = g_down
+
+    l_down = keys[pygame.K_l]
+    if l_down and not self._l_was_down:
+      # Land once on edge
+      try:
+        self.mc.land()
+      finally:
+        self.mc = None
+        self.manual_active = False
+      self._l_was_down = l_down
+      return
+    self._l_was_down = l_down
+
+    moved = False
+
+    # Planar
+    if keys[pygame.K_UP]:
+      self.mc.start_forward(self.speed_xy); moved = True
+    elif keys[pygame.K_DOWN]:
+      self.mc.start_back(self.speed_xy);  moved = True
+    elif keys[pygame.K_LEFT]:
+      self.mc.start_left(self.speed_xy);  moved = True
+    elif keys[pygame.K_RIGHT]:
+      self.mc.start_right(self.speed_xy);   moved = True
+
+    # Yaw
+    elif keys[pygame.K_a]:
+      self.mc.start_turn_left(self.yaw_rate);  moved = True
+    elif keys[pygame.K_d]:
+      self.mc.start_turn_right(self.yaw_rate); moved = True
+
+    # Vertical
+    elif keys[pygame.K_r]:
+      self.mc.start_up(self.speed_z);   moved = True
+    elif keys[pygame.K_f]:
+      self.mc.start_down(self.speed_z);   moved = True
+
+    # Neutral hover if nothing is pressed
+    if not moved:
+      self.mc.stop()
 
   def pygame(self):
     """
     Interactive PyGame controller for drone thrust and orientation.
     """
     done = False
-    thrust = self.thrust_start
-    roll = 0.0
-    pitch = 0.0
-    yaw = 0.0
 
     logger.info("In pygame function")
     pygame.init()
@@ -119,63 +198,38 @@ class Command:
     font = pygame.font.SysFont("monospace", 16)
 
     try:
+      logger.info("Resetting estimators.")
+      self._reset_estimator()
+      time.sleep(1.0)
+      self.drone_logger.start_logging()
+
       while not done:
         for event in pygame.event.get():
           if event.type == pygame.QUIT:
             pygame.quit()
             exit()
-          if event.type == pygame.KEYDOWN and event.key == pygame.K_BACKSPACE:
-            done = True
+          if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_BACKSPACE:
+              done = True
+            if event.key == pygame.K_h:
+              self._hover()
 
         keys = pygame.key.get_pressed()
         mods = pygame.key.get_mods()
+        self._go(keys)
 
-        if keys[pygame.K_w]:
-          thrust = min(thrust + self.thrust_step, self.thrust_limit)
-        if keys[pygame.K_s]:
-          thrust = max(self.thrust_start, thrust - self.thrust_step)
-
-        if keys[pygame.K_LEFT]:
-          roll += -0.001
-        if keys[pygame.K_RIGHT]:
-          roll += 0.001
-
-        if keys[pygame.K_UP]:
-          pitch += 0.05
-        if keys[pygame.K_DOWN]:
-          pitch += -0.05
-
-        if keys[pygame.K_a]:
-          yaw += -0.001
-        if keys[pygame.K_d]:
-          yaw += 0.001
-
-        if keys[pygame.K_SPACE]:
-          self._let_it_fly(thrust, self.thrust_limit)
-        if keys[pygame.K_h]:
-          self._hover()
-
-        self.drone._cf.commander.send_setpoint(roll, pitch, yaw, thrust)
         screen.fill((0, 0, 0))
 
         instructions = [
           "Drone Control",
           "=======================================",
-          "W/S         | Increase/Decrease Thrust",
-          "←/→         | Roll Left/Right",
-          "↑/↓         | Pitch Up/Down",
-          "A/D         | Yaw Left/Right",
-          "H           | Hover.",
-          "Spacebar    | Just let it fly, man.",
-          "Backspace   | Exit",
-          "",
-          f"Current Thrust Limit: {self.thrust_limit}",
-          f"Current Thrust Step: {self.thrust_step}",
-          "",
-          f"Roll   : {roll:.3f}",
-          f"Pitch  : {pitch:.3f}",
-          f"Yaw    : {yaw:.3f}",
-          f"Thrust : {thrust}"
+          "H           | Autonomous Hover (one-shot)",
+          "G           | Enter Manual Mode (take off)",
+          "L           | Land and exit Manual Mode",
+          "Arrow Keys  | Move (Forward, Back, Left, Right)",
+          "A / D       | Yaw left / right",
+          "R / F       | Altitude up / down",
+          "Backspace   | Exit program"
         ]
 
         for i, line in enumerate(instructions):
@@ -183,17 +237,11 @@ class Command:
           screen.blit(text, (20, 20 + i * 25))
 
         pygame.display.flip()
-        time.sleep(self.thrust_delay)
+        time.sleep(0.01)
 
     finally:
-      logger.info("Reducing thrust to 0...")
-      time.sleep(1)
-      while thrust >= 0:
-        self.drone._cf.commander.send_setpoint(0.0, 0.0, 0.0, thrust)
-        thrust -= int(self.thrust_step / 2)
-
-        time.sleep(self.thrust_delay)
-
+      logger.info("Stopping logging and closing connection to drone.")
+      self.drone_logger.stop_logging()
       self.drone._cf.commander.send_stop_setpoint()
       self.drone._cf.commander.send_notify_setpoint_stop()
       pygame.quit()
