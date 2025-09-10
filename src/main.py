@@ -29,23 +29,20 @@ RADIO_CHANNELS = {
 
 def run(connection_type):
   cflib.crtp.init_drivers(enable_debug_driver=False)
+  time.sleep(1.0)
+
   drone = DroneConnection(connection_type)
+  time.sleep(1.0)
+
   drone_logger = DroneLogs(drone)
-  command = Command(drone=drone,
-                    conn_str=drone,
-                    drone_logger=drone_logger, 
-                    thrust_start=10000, 
-                    thrust_limit=60000, 
-                    thrust_step=100, 
-                    thrust_delay=0.01)
+  time.sleep(1.0)
+
+  command = Command(drone=drone, drone_logger=drone_logger)
 
   try:
     drone.connect()
     time.sleep(5) # 5 second wait
-    drone_logger.start_logging()
     
-    # command.gradual_thrust_increase()
-    # command.hover()
     command.pygame()
   except KeyboardInterrupt:
     logger.debug("Operation interrupted by user.")
@@ -54,9 +51,6 @@ def run(connection_type):
     sys.exit(1)
   finally:
     if drone:
-      logger.info("Stopping logging and closing connection to drone.")
-      drone_logger.stop_logging()
-      drone._stop_timer()
       drone._cf.close_link()
 
 def print_usage():
