@@ -39,8 +39,8 @@ class Command:
     self.manual_active = False
     self._l_was_down = False     # for 'L' edge detection
     self._g_was_down = False     # for 'G' edge detection (enter manual)
-    self.speed_xy = 0.25         # m/s
-    self.speed_z  = 0.20         # m/s
+    self.speed_xy = 0.50         # m/s
+    self.speed_z  = 0.50         # m/s
     self.yaw_rate = 90.0         # deg/s
     self.takeoff_alt = 0.5       # m
 
