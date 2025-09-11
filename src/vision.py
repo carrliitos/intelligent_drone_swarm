@@ -30,8 +30,8 @@ class DetectorRT:
     self,
     dictionary: str = "4x4_1000",
     camera: int = 2, # USB-connected camera
-    width: int = 1280,
-    height: int = 720,
+    width: int = 1920,
+    height: int = 1080,
     fps: int = 60,
     calib_path: Optional[str] = None,
     marker_length_m: Optional[float] = None,
