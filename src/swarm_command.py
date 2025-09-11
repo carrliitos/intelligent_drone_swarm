@@ -109,3 +109,51 @@ class SwarmCommand:
     finally:
       self.swarm = None
       self.mcs.clear()
+
+  def enter_manual(self):
+    # Takeoff all
+    for mc in self.mcs.values():
+      try:
+        mc.take_off(self.takeoff_alt, velocity=0.4)
+      except Exception:
+        # Already flying is fine
+        pass
+
+  def land(self):
+    for mc in self.mcs.values():
+      try: mc.land()
+      except: pass
+
+  def _apply_move(self, fn_name: str, *args):
+    for mc in self.mcs.values():
+      getattr(mc, fn_name)(*args)
+
+  def _stop_all(self):
+    for mc in self.mcs.values():
+      try: mc.stop()
+      except: pass
+
+  def broadcast_go(self, keys):
+    moved = False
+    # planar
+    if keys.up:
+      self._apply_move('start_forward', self.speed_xy); moved = True
+    elif keys.down:
+      self._apply_move('start_back', self.speed_xy); moved = True
+    elif keys.left:
+      self._apply_move('start_left', self.speed_xy); moved = True
+    elif keys.right:
+      self._apply_move('start_right', self.speed_xy); moved = True
+    # yaw
+    elif keys.a:
+      self._apply_move('start_turn_left', self.yaw_rate); moved = True
+    elif keys.d:
+      self._apply_move('start_turn_right', self.yaw_rate); moved = True
+    # vertical
+    elif keys.r:
+      self._apply_move('start_up', self.speed_z); moved = True
+    elif keys.f:
+      self._apply_move('start_down', self.speed_z); moved = True
+
+    if not moved:
+      self._stop_all()
