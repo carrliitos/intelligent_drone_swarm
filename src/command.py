@@ -254,9 +254,23 @@ class Command:
         # SWARM MANUAL (S to enter, K to land/exit)
         s_down = keys[pygame.K_s]
         if s_down and not self._s_was_down and self.swarm and not self.manual_active and not self.swarm_active:
+          # Release single-drone link if it's part of the swarm set
+          try:
+            if hasattr(self.drone, "_cf") and hasattr(self.drone._cf, "link_uri"):
+              if getattr(self.swarm, "uris", ()) and (self.drone._cf.link_uri in self.swarm.uris):
+                logger.info(f"Releasing primary link {self.drone._cf.link_uri} for swarm…")
+                self.drone._cf.close_link()
+                time.sleep(0.2)
+          except Exception as e:
+            logger.warning(f"Unable to release primary link: {e}")
+
           # ensure swarm links are open & ready
+          logger.info("Opening swarm links...")
           self.swarm.open()
+
+          logger.info("Entering SWARM manual (takeoff all)...")
           self.swarm.enter_manual()
+
           self.swarm_active = True
         self._s_was_down = s_down
 
@@ -273,6 +287,15 @@ class Command:
             self.swarm.land()
           finally:
             self.swarm_active = False
+            # Reconnect primary link so single-drone controls work again
+            try:
+              if hasattr(self.drone, "_cf") and hasattr(self.drone, "link_uri"):
+                logger.info(f"Reconnecting primary link {self.drone.link_uri}…")
+                self.drone._cf.open_link(self.drone.link_uri)
+                # restore estimator state for single-drone path
+                self._reset_estimator()
+            except Exception as e:
+              logger.warning(f"Failed to reconnect primary link: {e}")
 
         # Per-frame control
         if self.swarm_active:
