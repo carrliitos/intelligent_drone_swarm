@@ -26,10 +26,12 @@ class SwarmCommand:
     self.speed_z  = 0.50
     self.yaw_rate = 90.0
 
+  @staticmethod
   def _wait_for_param_download(scf):
     while not scf.cf.param.is_updated:
       time.sleep(1.0)
 
+  @staticmethod
   def _wait_for_position_estimator(scf):
     cf = scf.cf
     log_config = LogConfig(name='Kalman Variance', period_in_ms=PERIOD_MS)
@@ -60,6 +62,7 @@ class SwarmCommand:
         if time.time() - start > MAX_WAIT_SEC:
           return False
 
+  @staticmethod
   def _reset_estimator(scf):
     cf = scf.cf
     cf.param.set_value('stabilizer.estimator', '2')   # EKF
@@ -75,6 +78,7 @@ class SwarmCommand:
     time.sleep(0.4)
     SwarmCommand._wait_for_position_estimator(scf)
 
+  @staticmethod
   def _arm(scf):
     scf.cf.platform.send_arming_request(True)
     time.sleep(0.5)
