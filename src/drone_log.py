@@ -136,14 +136,15 @@ class DroneLogs:
     pid_rate_yaw_logs = threading.Thread(target=self._pid_rate_yaw, daemon=True)
     state_estimates_logs = threading.Thread(target=self._stateEstimate, daemon=True)
 
-    battery_logs.start()
+    # Actually start logging
+    # battery_logs.start()
     # gyro_states_logs.start()
     # controller_logs.start()
     # motor_logs.start()
     # pid_rate_roll_logs.start()
     # pid_rate_pitch_logs.start()
     # pid_rate_yaw_logs.start()
-    state_estimates_logs.start()
+    # state_estimates_logs.start()
 
   def stop_logging(self):
     """
