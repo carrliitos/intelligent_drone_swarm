@@ -40,7 +40,7 @@ class DroneConnection:
     Callback triggered when the Crazyflie successfully connects.
     """
 
-    logger.info(f"Connected to {link_uri}.")
+    logger.info(f"Connected to {link_uri}")
 
   def _disconnected(self, link_uri):
     """
@@ -60,17 +60,6 @@ class DroneConnection:
     """
     logger.error(f"Connection to {link_uri} lost: {msg}")
 
-  def connect(self):
-    """
-    Establishes a connection to the Crazyflie, ensuring the connection is active.
-    """
-    try:
-      self._light_check()
-      self._arm()
-    except Exception as e:
-      logger.error(f"Error during connection attempt: {e}")
-      sys.exit(1)
-
   def _arm(self):
     self._cf.platform.send_arming_request(True)
     logger.info("Arming request complete.")
@@ -87,7 +76,17 @@ class DroneConnection:
       time.sleep(delay)
       self._cf.param.set_value('led.bitmask', 0)
       time.sleep(delay)
-      self._cf.param.set_value('sound.effect', 100)
 
     logger.info("Light check complete.")
     time.sleep(1.0)
+
+  def connect(self):
+    """
+    Establishes a connection to the Crazyflie, ensuring the connection is active.
+    """
+    try:
+      self._light_check()
+      self._arm()
+    except Exception as e:
+      logger.error(f"Error during connection attempt: {e}")
+      sys.exit(1)

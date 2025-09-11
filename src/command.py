@@ -1,6 +1,7 @@
 import time
 import os
 import pandas as pd
+import sys
 import pygame
 from pathlib import Path
 
@@ -107,6 +108,11 @@ class Command:
     time.sleep(0.4)  # small stillness pause helps
 
     ok = self._wait_for_position_estimator()
+
+    if not ok:
+      logger.info("Estimators not stable. Exiting...")
+      time.sleep(1.0)
+      sys.exit()
 
   def _hover(self):
     mc = MotionCommander(self.scf)
