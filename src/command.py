@@ -200,7 +200,12 @@ class Command:
       self.mc.stop()
 
   def _go_swarm(self, keys):
-    pass
+    """
+    Broadcast same control scheme to the entire swarm.
+    """
+    if not self.swarm:
+      return
+    self.swarm.broadcast_go(_KeySnapshot(keys))
 
   def pygame(self):
     """
@@ -233,16 +238,58 @@ class Command:
 
         keys = pygame.key.get_pressed()
         mods = pygame.key.get_mods()
-        self._go(keys)
+
+        # Single-drone MANUAL (G to enter, L to land/exit)
+        g_down = keys[pygame.K_g]
+        if g_down and not self._g_was_down and not self.manual_active and not self.swarm_active:
+          if self.mc is None:
+            self.mc = MotionCommander(self.scf)
+          try:
+            self.mc.take_off(self.takeoff_alt, velocity=0.4)
+          except Exception:
+            pass
+          self.manual_active = True
+        self._g_was_down = g_down
+
+        # SWARM MANUAL (S to enter, K to land/exit)
+        s_down = keys[pygame.K_s]
+        if s_down and not self._s_was_down and self.swarm and not self.manual_active and not self.swarm_active:
+          # ensure swarm links are open & ready
+          self.swarm.open()
+          self.swarm.enter_manual()
+          self.swarm_active = True
+        self._s_was_down = s_down
+
+        # LAND/EXIT: single(L) vs swarm(K)
+        if self.manual_active and keys[pygame.K_l]:
+          try:
+            self.mc.land()
+          finally:
+            self.mc = None
+            self.manual_active = False
+
+        if self.swarm_active and keys[pygame.K_k]:
+          try:
+            self.swarm.land()
+          finally:
+            self.swarm_active = False
+
+        # Per-frame control
+        if self.swarm_active:
+          self._go_swarm(keys)
+        else:
+          self._go(keys)
 
         screen.fill((0, 0, 0))
 
         instructions = [
           "Drone Control",
           "=======================================",
-          "H           | Autonomous Hover (one-shot)",
-          "G           | Enter Manual Mode (take off)",
-          "L           | Land and exit Manual Mode",
+          "H           | Autonomous Hover (one-shot, single)",
+          "G           | Single-Drone Manual (take off)",
+          "L           | Single-Drone Land / Exit Manual",
+          "S           | SWARM Manual (take off all)",
+          "K           | SWARM Land / Exit Manual",
           "Arrow Keys  | Move (Forward, Back, Left, Right)",
           "A / D       | Yaw left / right",
           "R / F       | Altitude up / down",
@@ -262,4 +309,19 @@ class Command:
       self.drone._cf.commander.send_stop_setpoint()
       self.drone._cf.commander.send_notify_setpoint_stop()
       pygame.quit()
+
+class _KeySnapshot:
+  """
+  Inner class adapter for SwarmCommand so that SwarmCommand doesn't depend on pygame.
+  """
+  def __init__(self, keys):
+    import pygame
+    self.up    = keys[pygame.K_UP]
+    self.down  = keys[pygame.K_DOWN]
+    self.left  = keys[pygame.K_LEFT]
+    self.right = keys[pygame.K_RIGHT]
+    self.a     = keys[pygame.K_a]
+    self.d     = keys[pygame.K_d]
+    self.r     = keys[pygame.K_r]
+    self.f     = keys[pygame.K_f]
 
