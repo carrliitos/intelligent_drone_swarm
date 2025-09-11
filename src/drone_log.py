@@ -137,14 +137,14 @@ class DroneLogs:
     state_estimates_logs = threading.Thread(target=self._stateEstimate, daemon=True)
 
     # Actually start logging
-    # battery_logs.start()
-    # gyro_states_logs.start()
-    # controller_logs.start()
-    # motor_logs.start()
-    # pid_rate_roll_logs.start()
-    # pid_rate_pitch_logs.start()
-    # pid_rate_yaw_logs.start()
-    # state_estimates_logs.start()
+    battery_logs.start()
+    gyro_states_logs.start()
+    controller_logs.start()
+    motor_logs.start()
+    pid_rate_roll_logs.start()
+    pid_rate_pitch_logs.start()
+    pid_rate_yaw_logs.start()
+    state_estimates_logs.start()
 
   def stop_logging(self):
     """
@@ -394,16 +394,12 @@ class DroneLogs:
       self.stateEstimate_x = data["stateEstimate.x"]
       self.stateEstimate_x = data["stateEstimate.x"]
 
-    logger.info(f"Timestamp: {timestamp}, Data: {data}")
-
   def _log_callback__pid_rate_roll(self, timestamp, data, logconf):
     """ Callback for PID rates data. """
     with self.lock:
       self.pid_rate__roll_outP = data["pid_rate.roll_outP"]
       self.pid_rate__roll_outI = data["pid_rate.roll_outI"]
       self.pid_rate__roll_outD = data["pid_rate.roll_outD"]
-
-    logger.info(f"Timestamp: {timestamp}, Data: {data}")
 
   def _log_callback__pid_rate_pitch(self, timestamp, data, logconf):
     """ Callback for PID rates data. """
@@ -412,16 +408,12 @@ class DroneLogs:
       self.pid_rate__pitch_outI = data["pid_rate.pitch_outI"]
       self.pid_rate__pitch_outD = data["pid_rate.pitch_outD"]
 
-    logger.info(f"Timestamp: {timestamp}, Data: {data}")
-
   def _log_callback__pid_rate_yaw(self, timestamp, data, logconf):
     """ Callback for PID rates data. """
     with self.lock:
       self.pid_rate__yaw_outP = data["pid_rate.yaw_outP"]
       self.pid_rate__yaw_outI = data["pid_rate.yaw_outI"]
       self.pid_rate__yaw_outD = data["pid_rate.yaw_outD"]
-
-    logger.info(f"Timestamp: {timestamp}, Data: {data}")
 
   def _log_callback__motor(self, timestamp, data, logconf):
     """ Callback for motor data. """
@@ -431,16 +423,12 @@ class DroneLogs:
       self.motor_m3 = data["motor.m3"]
       self.motor_m4 = data["motor.m4"]
 
-    logger.info(f"Timestamp: {timestamp}, Data: {data}")
-
   def _log_callback__gyro(self, timestamp, data, logconf):
     """ Callback for gyro data. """
     with self.lock:
       self.gyro_x = data["gyro.x"]
       self.gyro_y = data["gyro.y"]
       self.gyro_z = data["gyro.z"]
-
-    logger.info(f"Timestamp: {timestamp}, Data: {data}")
 
   def _log_callback__controller(self, timestamp, data, logconf):
     """ Callback for controller data. """
@@ -450,15 +438,11 @@ class DroneLogs:
       self.pitch = data["stateEstimateZ.ratePitch"]
       self.yaw = data["stateEstimateZ.rateYaw"]
 
-    logger.info(f"Timestamp: {timestamp}, Data: {data}")
-
   def _log_callback__power(self, timestamp, data, logconf):
     """ Callback for power management data. """
     with self.lock:
       self.pm_vbatMV = data["pm.vbatMV"]
       self.pm_batteryLevel = data["pm.batteryLevel"]
-
-    logger.info(f"Timestamp: {timestamp}, Data: {data}")
 
   def _log_error_callback(self, logconf, msg):
     """
