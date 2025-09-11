@@ -6,6 +6,13 @@ from typing import Optional, Tuple, Dict, Any, List
 import cv2
 import numpy as np
 
+from utils import logger, context
+
+directory = context.get_context(os.path.abspath(__file__))
+logger_file_name = Path(directory).stem
+logger_name = Path(__file__).stem
+logger = logger.setup_logger(logger_name, f"{directory}/logs/{logger_file_name}.log")
+
 class DetectorRT:
   """
   Real-time ArUco detection and pose estimation (**CURRENTLY OPTIONAL**).
@@ -65,7 +72,21 @@ class DetectorRT:
     self.last_results: Dict[str, Any] = {}
 
   def open(self):
-    pass
+    """
+    Open the camera and then do basic capture settings.
+    """
+    self.cap = cv2.VideoCapture(self.camera_index, cv2.CAP_ANY)
+    if not self.cap.isOpened():
+      logger.error("Could not open camera.")
+      raise RuntimeError("Camera open failed.")
+
+    # idk if this actuall does anything -- i just saw this on some tutorial
+    self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
+    self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
+    self.cap.set(cv2.CAP_PROP_FPS, self.fps)
+    self.cap.set(cv2.CAP_PROP_AUTOFOCUS, 1)
+    self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1)
+    self.cap.set(cv2.CAP_PROP_EXPOSURE, -6)
 
   def release(self):
     pass
