@@ -78,3 +78,34 @@ class SwarmCommand:
   def _arm(scf):
     scf.cf.platform.send_arming_request(True)
     time.sleep(0.5)
+
+  def open(self):
+    if self.swarm is not None:
+      return
+
+    cflib.crtp.init_drivers(enable_debug_driver=False)
+    self.swarm = Swarm(self.uris, factory=self.factory)
+    self.swarm.open_links()
+
+    # Reset + param download + arm (in parallel)
+    self.swarm.parallel_safe(self._reset_estimator)
+    self.swarm.parallel_safe(self._wait_for_param_download)
+    self.swarm.parallel_safe(self._arm)
+
+    # Create MotionCommander per drone
+    for uri, scf in self.swarm._cfs.items():
+      self.mcs[uri] = MotionCommander(scf)
+
+  def close(self):
+    if self.swarm is None:
+      return
+
+    try:
+      # Stop/land before close
+      for mc in self.mcs.values():
+        try: mc.stop()
+        except: pass
+      self.swarm.close_links()
+    finally:
+      self.swarm = None
+      self.mcs.clear()
