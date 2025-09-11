@@ -12,6 +12,7 @@ from cflib.positioning.motion_commander import MotionCommander
 from utils import logger, context
 from drone_connection import DroneConnection
 from drone_log import DroneLogs
+from swarm_command import SwarmCommand
 
 directory = context.get_context(os.path.abspath(__file__))
 logger_file_name = Path(directory).stem
@@ -19,16 +20,21 @@ logger_name = Path(__file__).stem
 logger = logger.setup_logger(logger_name, f"{directory}/logs/{logger_file_name}.log")
 
 class Command:
-  def __init__(self, drone: DroneConnection, drone_logger: DroneLogs):
+  def __init__(self, 
+               drone: DroneConnection, 
+               drone_logger: DroneLogs, 
+               swarm: SwarmCommand | None = None):
     """
     Handles thrust commands for the drone.
 
     :param drone: Instance of DroneConnection.
     :param drone_logger: Instance of DroneLogs.
+    :param swarm: Instance of SwarmCommand.
     """
     self.drone = drone
     self.scf = drone._scf # SyncCrazyflie
     self.drone_logger = drone_logger
+    self.swarm = swarm
 
     self.window = 10
     self.period_ms = 500
@@ -37,8 +43,10 @@ class Command:
 
     self.mc = None
     self.manual_active = False
+    self.swarm_active = False
     self._l_was_down = False     # for 'L' edge detection
     self._g_was_down = False     # for 'G' edge detection (enter manual)
+    self._s_was_down = False     # for 'S' edge (enter swarm manual)
     self.speed_xy = 0.50         # m/s
     self.speed_z  = 0.50         # m/s
     self.yaw_rate = 90.0         # deg/s
@@ -190,6 +198,9 @@ class Command:
     # Neutral hover if nothing is pressed
     if not moved:
       self.mc.stop()
+
+  def _go_swarm(self, keys):
+    pass
 
   def pygame(self):
     """
