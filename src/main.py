@@ -1,5 +1,7 @@
 import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)
+import logging
+logging.getLogger("cflib.crazyflie.log").setLevel(logging.WARNING)
 
 import os
 import sys
