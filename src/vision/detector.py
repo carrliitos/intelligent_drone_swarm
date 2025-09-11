@@ -143,6 +143,35 @@ class DetectorRT:
         else:
           dists = [float(np.linalg.norm(t)) for t in tvecs]
 
+    # FPS overlay
+    self._fps_counter += 1
+    now = time.time()
+    if now - self._fps_prev >= 0.5:
+      self._fps_display = self._fps_counter / (now - self._fps_prev)
+      self._fps_prev = now
+      self._fps_counter = 0
+
+    cv2.putText(frame, 
+                f"{self._fps_display:.1f} FPS", 
+                (10, frame.shape[0]- 10), 
+                cv2.FONT_HERSHEY_SIMPLEX, 
+                0.6, 
+                (255, 255, 255), 
+                2, 
+                cv2.LINE_AA)
+
+    results = {
+      "ids": ids,
+      "corners": corners if corners is not None else {},
+      "rvecs": rvecs,
+      "tvecs": tvecs,
+      "dist_m": dists,
+      "fps": self._fps_display
+    }
+
+    self.last_results = results
+    return frame, results
+
   def process_frame(self, frame: np.ndarray):
     pass
 
