@@ -89,10 +89,59 @@ class DetectorRT:
     self.cap.set(cv2.CAP_PROP_EXPOSURE, -6)
 
   def release(self):
-    pass
+    """
+    Release camera and detroy and open windows.
+    """
+    if self.cap is not None:
+      self.cap.release()
+      self.cap = None
+    cv2.destroyAllWindows()
 
   def read(self):
-    pass
+    """
+    Grab a frame from the camera, run detection (and pose if possible),
+    draw overlays, and return (annotated_frame, results_dict).
+
+    results_dict keys:
+      - 'ids': np.ndarray shape (N,1) or None
+      - 'corners': list of N arrays (1,4,2) or []
+      - 'rvecs': np.ndarray (N,1,3) if pose, else None
+      - 'tvecs': np.ndarray (N,1,3) if pose, else None
+      - 'dist_m': list of N floats (Euclidean distances) if pose, else []
+      - 'fps': float (smoothed)
+    """
+    if self.cap is None:
+      logger.error("Call open() before read().")
+      raise RuntimeError("Call open() before read().")
+
+    ok, frame = self.cap.read()
+    if not ok or frame is None:
+      return None, {}
+
+    corner, ids, _ = self.detector.detectMarkers(frame)
+    rvecs = tvecs = None
+    dists: List[float] = []
+
+    if ids is not None and len(ids) > 0:
+      # Draw the detected boundaries and their IDs
+      cv2.aruco.drawDetectedMarkers(frame, corner, ids)
+
+      if self._do_pose:
+        rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(corners, 
+                                                              self.marker_length_m, 
+                                                              self.camera_matrix, 
+                                                              self.dist_coeffs)
+        if self.draw_axes:
+          for rvec, tvec in zip(rvecs, tvecs):
+            cv2.drawFrameAxes(frame, 
+                              self.camera_matrix, 
+                              self.dist_coeffs,
+                              rvec,
+                              tvec,
+                              (self.marker_length_m * 0.5))
+            dists.append(float(np.linalg.norm(tvec)))
+        else:
+          dists = [float(np.linalg.norm(t)) for t in tvecs]
 
   def process_frame(self, frame: np.ndarray):
     pass
