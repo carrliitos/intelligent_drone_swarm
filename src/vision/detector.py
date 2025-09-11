@@ -173,7 +173,41 @@ class DetectorRT:
     return frame, results
 
   def process_frame(self, frame: np.ndarray):
-    pass
+    """
+    Run detection (and pose) on a provided frame.
+    Returns results dict (same schema as read()) and modifies the frame 
+    in-place with overlays.
+    """
+    corners, ids, _ = self.detector.detectMarkers(frame)
+    rvecs = tvecs = None
+    dists: List[float] = []
+
+    if ids is not None and len(ids) > 0:
+      cv2.aruco.drawDetectedMarkers(frame, corners, ids)
+      if self._do_pose:
+        rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(corners, 
+                                                              self.marker_length_m, 
+                                                              self.camera_matrix, 
+                                                              self.dist_coeffs)
+        if self.draw_axes:
+          for rvec, tvec in zip(rvecs, tvecs):
+            cv2.drawFrameAxes(frame, 
+                              self.camera_matrix, 
+                              self.dist_coeffs, 
+                              rvec, 
+                              tvec, 
+                              (self.marker_length_m * 0.5))
+            dists.append(float(np.linalg.norm(tvec)))
+        else:
+          dists = [float(np.linalg.norm(t)) for t in tvecs]
+
+    return {
+      "ids": ids,
+      "corners": corners if corners is not None else [],
+      "rvecs": rvecs,
+      "tvecs": tvecs,
+      "dist_m": dists,
+    }
 
   @staticmethod
   def _load_calibration(npz_path: str):
