@@ -33,7 +33,7 @@ class DetectorRT:
     height: int = 720,
     fps: int = 60,
     calib_path: Optional[str] = None,
-    marker_length_m: Optional[str] = None,
+    marker_length_m: Optional[float] = None,
     window_title: str = "Intelligent Drone Swarm",
     draw_axes: bool = True
   ):
@@ -118,13 +118,13 @@ class DetectorRT:
     if not ok or frame is None:
       return None, {}
 
-    corner, ids, _ = self.detector.detectMarkers(frame)
+    corners, ids, _ = self.detector.detectMarkers(frame)
     rvecs = tvecs = None
     dists: List[float] = []
 
     if ids is not None and len(ids) > 0:
       # Draw the detected boundaries and their IDs
-      cv2.aruco.drawDetectedMarkers(frame, corner, ids)
+      cv2.aruco.drawDetectedMarkers(frame, corners, ids)
 
       if self._do_pose:
         rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(corners, 
