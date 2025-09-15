@@ -12,6 +12,7 @@ from cflib.positioning.motion_commander import MotionCommander
 from utils import logger, context
 from drone_connection import DroneConnection
 from drone_log import DroneLogs
+from swarm_command import SwarmCommand
 
 directory = context.get_context(os.path.abspath(__file__))
 logger_file_name = Path(directory).stem
@@ -19,16 +20,21 @@ logger_name = Path(__file__).stem
 logger = logger.setup_logger(logger_name, f"{directory}/logs/{logger_file_name}.log")
 
 class Command:
-  def __init__(self, drone: DroneConnection, drone_logger: DroneLogs):
+  def __init__(self, 
+               drone: DroneConnection, 
+               drone_logger: DroneLogs, 
+               swarm: SwarmCommand | None = None):
     """
     Handles thrust commands for the drone.
 
     :param drone: Instance of DroneConnection.
     :param drone_logger: Instance of DroneLogs.
+    :param swarm: Instance of SwarmCommand.
     """
     self.drone = drone
     self.scf = drone._scf # SyncCrazyflie
     self.drone_logger = drone_logger
+    self.swarm = swarm
 
     self.window = 10
     self.period_ms = 500
@@ -37,8 +43,10 @@ class Command:
 
     self.mc = None
     self.manual_active = False
+    self.swarm_active = False
     self._l_was_down = False     # for 'L' edge detection
     self._g_was_down = False     # for 'G' edge detection (enter manual)
+    self._s_was_down = False     # for 'S' edge (enter swarm manual)
     self.speed_xy = 0.50         # m/s
     self.speed_z  = 0.50         # m/s
     self.yaw_rate = 90.0         # deg/s
@@ -191,6 +199,14 @@ class Command:
     if not moved:
       self.mc.stop()
 
+  def _go_swarm(self, keys):
+    """
+    Broadcast same control scheme to the entire swarm.
+    """
+    if not self.swarm:
+      return
+    self.swarm.broadcast_go(_KeySnapshot(keys))
+
   def pygame(self):
     """
     Interactive PyGame controller for drone thrust and orientation.
@@ -222,16 +238,81 @@ class Command:
 
         keys = pygame.key.get_pressed()
         mods = pygame.key.get_mods()
-        self._go(keys)
+
+        # Single-drone MANUAL (G to enter, L to land/exit)
+        g_down = keys[pygame.K_g]
+        if g_down and not self._g_was_down and not self.manual_active and not self.swarm_active:
+          if self.mc is None:
+            self.mc = MotionCommander(self.scf)
+          try:
+            self.mc.take_off(self.takeoff_alt, velocity=0.4)
+          except Exception:
+            pass
+          self.manual_active = True
+        self._g_was_down = g_down
+
+        # SWARM MANUAL (S to enter, K to land/exit)
+        s_down = keys[pygame.K_s]
+        if s_down and not self._s_was_down and self.swarm and not self.manual_active and not self.swarm_active:
+          # Release single-drone link if it's part of the swarm set
+          try:
+            if hasattr(self.drone, "_cf") and hasattr(self.drone._cf, "link_uri"):
+              if getattr(self.swarm, "uris", ()) and (self.drone._cf.link_uri in self.swarm.uris):
+                logger.info(f"Releasing primary link {self.drone._cf.link_uri} for swarm…")
+                self.drone._cf.close_link()
+                time.sleep(0.2)
+          except Exception as e:
+            logger.warning(f"Unable to release primary link: {e}")
+
+          # ensure swarm links are open & ready
+          logger.info("Opening swarm links...")
+          self.swarm.open()
+
+          logger.info("Entering SWARM manual (takeoff all)...")
+          self.swarm.enter_manual()
+
+          self.swarm_active = True
+        self._s_was_down = s_down
+
+        # LAND/EXIT: single(L) vs swarm(K)
+        if self.manual_active and keys[pygame.K_l]:
+          try:
+            self.mc.land()
+          finally:
+            self.mc = None
+            self.manual_active = False
+
+        if self.swarm_active and keys[pygame.K_k]:
+          try:
+            self.swarm.land()
+          finally:
+            self.swarm_active = False
+            # Reconnect primary link so single-drone controls work again
+            try:
+              if hasattr(self.drone, "_cf") and hasattr(self.drone, "link_uri"):
+                logger.info(f"Reconnecting primary link {self.drone.link_uri}…")
+                self.drone._cf.open_link(self.drone.link_uri)
+                # restore estimator state for single-drone path
+                self._reset_estimator()
+            except Exception as e:
+              logger.warning(f"Failed to reconnect primary link: {e}")
+
+        # Per-frame control
+        if self.swarm_active:
+          self._go_swarm(keys)
+        else:
+          self._go(keys)
 
         screen.fill((0, 0, 0))
 
         instructions = [
           "Drone Control",
           "=======================================",
-          "H           | Autonomous Hover (one-shot)",
-          "G           | Enter Manual Mode (take off)",
-          "L           | Land and exit Manual Mode",
+          "H           | Autonomous Hover (one-shot, single)",
+          "G           | Single-Drone Manual (take off)",
+          "L           | Single-Drone Land / Exit Manual",
+          "S           | SWARM Manual (take off all)",
+          "K           | SWARM Land / Exit Manual",
           "Arrow Keys  | Move (Forward, Back, Left, Right)",
           "A / D       | Yaw left / right",
           "R / F       | Altitude up / down",
@@ -251,4 +332,19 @@ class Command:
       self.drone._cf.commander.send_stop_setpoint()
       self.drone._cf.commander.send_notify_setpoint_stop()
       pygame.quit()
+
+class _KeySnapshot:
+  """
+  Inner class adapter for SwarmCommand so that SwarmCommand doesn't depend on pygame.
+  """
+  def __init__(self, keys):
+    import pygame
+    self.up    = keys[pygame.K_UP]
+    self.down  = keys[pygame.K_DOWN]
+    self.left  = keys[pygame.K_LEFT]
+    self.right = keys[pygame.K_RIGHT]
+    self.a     = keys[pygame.K_a]
+    self.d     = keys[pygame.K_d]
+    self.r     = keys[pygame.K_r]
+    self.f     = keys[pygame.K_f]
 
