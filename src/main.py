@@ -1,5 +1,7 @@
 import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)
+import logging
+logging.getLogger("cflib.crazyflie.log").setLevel(logging.WARNING)
 
 import os
 import sys
@@ -10,6 +12,7 @@ from utils import logger
 from utils import context
 from drone_connection import DroneConnection
 from command import Command
+from swarm_command import SwarmCommand
 from drone_log import DroneLogs
 
 import cflib
@@ -27,7 +30,7 @@ RADIO_CHANNELS = {
   "9": "radio://0/80/2M/E7E7E7E7E9"
 }
 
-def run(connection_type):
+def run(connection_type, swarm_uris=None):
   cflib.crtp.init_drivers(enable_debug_driver=False)
   time.sleep(1.0)
 
@@ -37,7 +40,10 @@ def run(connection_type):
   drone_logger = DroneLogs(drone)
   time.sleep(1.0)
 
-  command = Command(drone=drone, drone_logger=drone_logger)
+  swarm_cmd = SwarmCommand(swarm_uris) if swarm_uris else None
+  command = Command(drone=drone, 
+                    drone_logger=drone_logger, 
+                    swarm=swarm_cmd)
 
   try:
     drone.connect()
@@ -50,13 +56,15 @@ def run(connection_type):
     logger.error(f"Error: {e}")
     sys.exit(1)
   finally:
-    if drone:
-      drone._cf.close_link()
+    if swarm_cmd:
+      swarm_cmd.land()
+      swarm_cmd.close()
 
 def print_usage():
   print("Usage:")
   print("  python main.py udp")
   print("  python main.py radio [7|8|9]")
+  print("  python main.py swarm <channels ...> # e.g. swarm 7, 8, 9")
   sys.exit(1)
 
 if __name__ == '__main__':
@@ -79,6 +87,24 @@ if __name__ == '__main__':
     else:
       logger.error(f"Invalid radio channel: {channel}")
       print_usage()
+  elif arg == "swarm":
+    if len(sys.argv) < 3:
+      logger.error("Provide at least one radio channel for swarm.")
+      print_usage()
+
+    channels = sys.argv[2:]
+    bad = [c for c in channels if c not in RADIO_CHANNELS]
+    if bad:
+      logger.error(f"Invalid radio channel(s): {', '.join(bad)}")
+      print_usage()
+
+    # For single-drone reference (left panel) pick the first for Command()
+    first = channels[0]
+    connection_type = RADIO_CHANNELS[first]
+    swarm_uris = [RADIO_CHANNELS[c] for c in channels]
+    logger.info(f"Swarm URIs: {swarm_uris}")
+    run(connection_type, swarm_uris=swarm_uris)
+    sys.exit(0)
   else:
     logger.error(f"Invalid connection type: {arg}")
     print_usage()
