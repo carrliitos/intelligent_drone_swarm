@@ -53,12 +53,14 @@ class DroneConnection:
     Callback triggered when the initial connection attempt fails.
     """
     logger.error(f"Connection to {link_uri} failed: {msg}")
+    sys.exit(1)
 
   def _connection_lost(self, link_uri, msg):
     """
     Callback triggered when the connection is lost after being established.
     """
     logger.error(f"Connection to {link_uri} lost: {msg}")
+    sys.exit(1)
 
   def _arm(self):
     self._cf.platform.send_arming_request(True)
