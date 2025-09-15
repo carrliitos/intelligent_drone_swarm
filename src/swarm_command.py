@@ -13,7 +13,7 @@ THRESHOLD = 0.001
 MAX_WAIT_SEC = 10.0  # hard cap per CF
 
 class SwarmCommand:
-  def __init__(self, uris: Iterable[str], takeoff_alt: float = 0.25):
+  def __init__(self, uris: Iterable[str], takeoff_alt: float = 0.5):
     """
     Wraps a cflib Swarm for "manual" MotionCommander-style broadcast control
     """
@@ -23,7 +23,7 @@ class SwarmCommand:
     self.mcs: Dict[str, MotionCommander] = {}
     self.takeoff_alt = takeoff_alt
     self.speed_xy = 0.50
-    self.speed_z  = 0.50
+    self.speed_z  = 1.00
     self.yaw_rate = 90.0
 
   @staticmethod
