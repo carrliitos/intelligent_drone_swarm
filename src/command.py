@@ -120,7 +120,7 @@ class Command:
     try:
       logger.info("Taking off now!")
       time.sleep(1.0)
-      mc.take_off(0.5, velocity=1.0)
+      mc.take_off(0.25, velocity=1.0)
       time.sleep(5.0)
     finally:
       logger.info("Landing...")
