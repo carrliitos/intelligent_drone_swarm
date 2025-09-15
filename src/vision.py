@@ -30,9 +30,9 @@ class DetectorRT:
     self,
     dictionary: str = "4x4_1000",
     camera: int = 2, # USB-connected camera
-    width: int = 1920,
-    height: int = 1080,
-    fps: int = 60,
+    width: int = 640,
+    height: int = 480,
+    fps: int = 30,
     calib_path: Optional[str] = None,
     marker_length_m: Optional[float] = None,
     window_title: str = "Intelligent Drone Swarm",
@@ -76,16 +76,20 @@ class DetectorRT:
     """
     Open the camera and then do basic capture settings.
     """
-    self.cap = cv2.VideoCapture(self.camera_index, cv2.CAP_ANY)
+    self.cap = cv2.VideoCapture(self.camera_index, cv2.CAP_V4L2)
     if not self.cap.isOpened():
       logger.error("Could not open camera.")
       raise RuntimeError("Camera open failed.")
 
     # idk if this actuall does anything -- i just saw this on some tutorial
+    self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
     self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
     self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
     self.cap.set(cv2.CAP_PROP_FPS, self.fps)
-    self.cap.set(cv2.CAP_PROP_AUTOFOCUS, 1)
+
+    self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1) # Reduce Latency
+
+    # Keep exposure short enough for 30 fps; disable auto if needed
     self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1)
     self.cap.set(cv2.CAP_PROP_EXPOSURE, -6)
 
