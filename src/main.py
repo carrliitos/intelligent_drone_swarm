@@ -45,50 +45,51 @@ def run(connection_type, use_vision=False):
   vision_thread = None
   stop_vision = threading.Event()
 
-  if use_vision:
-    detector = DetectorRT(
-      dictionary="4x4_1000",
-      camera=2,
-      width=1920,
-      height=1080,
-      fps=60,
-      calib_path=None,
-      marker_length_m=None,
-      draw_axes=True
-    )
-    detector.open()
+  try:
+    logger.info("==========Connecting to drone==========")
+    drone.connect()
+    time.sleep(5.0)
 
-    def _vision_loop():
-      # Loop to display annotated frames
-      while not stop_vision.is_set():
-        frame, results = detector.read()
-        if frame is None:
-          continue
-        # Log detections
-        ids = results.get("ids")
-        if ids is not None:
+    if use_vision:
+      logger.info("==========Connecting to OpenCV==========")
+      detector = DetectorRT(
+        dictionary="4x4_1000",
+        camera=2,
+        calib_path=None,
+        marker_length_m=None,
+        draw_axes=True
+      )
+      detector.open()
+
+      def _vision_loop():
+        # Loop to display annotated frames
+        while not stop_vision.is_set():
+          frame, results = detector.read()
+          if frame is None:
+            continue
+          # Log detections
+          ids = results.get("ids")
+          if ids is not None:
+            try:
+              flat_ids = [int(x[0]) for x in ids]
+            except Exception:
+              pass
+
           try:
-            flat_ids = [int(x[0]) for x in ids]
-            logger.info(f"Detected markers: {flat_ids}")
+            cv2.imshow("Intelligent Drone Swarm (ArUco)", frame)
+            if (cv2.waitKey(1) & 0xFF) == 27:  # ESC to close vision
+              stop_vision.set()
+              break
           except Exception:
             pass
 
-        try:
-          cv2.imshow("Intelligent Drone Swarm (ArUco)", frame)
-          if (cv2.waitKey(1) & 0xFF) == 27:  # ESC to close vision
-            stop_vision.set()
-            break
-        except Exception:
-          pass
+      vision_thread = threading.Thread(target=_vision_loop, daemon=True)
+      vision_thread.start()
+    time.sleep(5.0)
 
-    vision_thread = threading.Thread(target=_vision_loop, daemon=True)
-    vision_thread.start()
-
-  try:
-    drone.connect()
-    time.sleep(5) # 5 second wait
-    
+    logger.info("==========Connecting to PyGame==========")
     command.pygame()
+    time.sleep(5.0)
   except KeyboardInterrupt:
     logger.debug("Operation interrupted by user.")
   except Exception as e:
