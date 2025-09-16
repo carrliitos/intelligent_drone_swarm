@@ -60,7 +60,12 @@ def run(connection_type, use_vision=False, swarm_uris=None):
         camera=2,
         calib_path=None,
         marker_length_m=None,
-        draw_axes=True
+        draw_axes=True,
+        # Draw grid
+        draw_grid=True,
+        grid_step_px=40,
+        draw_rule_of_thirds=False,
+        draw_crosshair=False
       )
       detector.open()
 

@@ -36,7 +36,14 @@ class DetectorRT:
     calib_path: Optional[str] = None,
     marker_length_m: Optional[float] = None,
     window_title: str = "Intelligent Drone Swarm",
-    draw_axes: bool = True
+    draw_axes: bool = True,
+    # Draw grid
+    draw_grid: bool = True,
+    grid_step_px: int = 40,
+    grid_color: Tuple[int, int, int] = (60, 220, 60),
+    grid_thickness: int = 1,
+    draw_rule_of_thirds: bool = False,
+    draw_crosshair: bool = False
   ):
     self.dictionary_name = dictionary
     if dictionary not in self._DICT_NAME_TO_ENUM:
@@ -71,6 +78,35 @@ class DetectorRT:
     self._fps_counter = 0
     self._fps_display = 0.0
     self.last_results: Dict[str, Any] = {}
+
+    self.draw_grid = draw_grid
+    self.grid_step_px = grid_step_px
+    self.grid_color = grid_color
+    self.grid_thickness = grid_thickness
+    self.draw_rule_of_thirds = draw_rule_of_thirds
+    self.draw_crosshair = draw_crosshair
+
+  def _overlay_grid(self, frame: np.ndarray):
+    h, w = frame.shape[:2]
+
+    if self.draw_grid and self.grid_step_px > 0:
+      step = self.grid_step_px
+      # vertical lines
+      for x in range(step, w, step):
+        cv2.line(frame, (x, 0), (x, h), self.grid_color, self.grid_thickness, cv2.LINE_AA)
+      # Horizontal lines
+      for y in range(step, h, step):
+        cv2.line(frame, (0, y), (w, y), self.grid_color, self.grid_thickness, cv2.LINE_AA)
+
+    # Rule of thirds: https://web.cecs.pdx.edu/~fliu/papers/ism2011.pdf
+    if self.draw_rule_of_thirds:
+      pass
+
+    if self.draw_crosshair:
+      cx, cy = w // 2, h // 2
+      size = min(w, h) // 20
+      cv2.line(frame, (cx - size, cy), (cx + size, cy), self.grid_color, self.grid_thickness + 1, cv2.LINE_AA)
+      cv2.line(frame, (cx, cy - size), (cx, cy + size), self.grid_color, self.grid_thickness + 1, cv2.LINE_AA)
 
   def open(self):
     """
@@ -173,7 +209,9 @@ class DetectorRT:
       "fps": self._fps_display
     }
 
+    self._overlay_grid(frame)
     self.last_results = results
+
     return frame, results
 
   def process_frame(self, frame: np.ndarray):
@@ -204,6 +242,8 @@ class DetectorRT:
             dists.append(float(np.linalg.norm(tvec)))
         else:
           dists = [float(np.linalg.norm(t)) for t in tvecs]
+
+    self._overlay_grid(frame)
 
     return {
       "ids": ids,
