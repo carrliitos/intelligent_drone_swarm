@@ -100,7 +100,12 @@ class DetectorRT:
 
     # Rule of thirds: https://web.cecs.pdx.edu/~fliu/papers/ism2011.pdf
     if self.draw_rule_of_thirds:
-      pass
+      x1, y1 = w // 3, (2 * w) // 3
+      x2, y2 = h // 3, (2 * h) // 3
+      cv2.line(frame, (x1, 0), (x1, h), self.grid_color, self.grid_thickness, cv2.LINE_AA)
+      cv2.line(frame, (x2, 0), (x2, h), self.grid_color, self.grid_thickness, cv2.LINE_AA)
+      cv2.line(frame, (0, y1), (w, y1), self.grid_color, self.grid_thickness, cv2.LINE_AA)
+      cv2.line(frame, (0, y2), (w, y2), self.grid_color, self.grid_thickness, cv2.LINE_AA)
 
     if self.draw_crosshair:
       cx, cy = w // 2, h // 2
