@@ -1,19 +1,19 @@
 import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)
-import logging
-logging.getLogger("cflib.crazyflie.log").setLevel(logging.WARNING)
 
 import os
 import sys
 import time
+import threading
+import cv2
 from pathlib import Path
 
 from utils import logger
 from utils import context
 from drone_connection import DroneConnection
 from command import Command
-from swarm_command import SwarmCommand
 from drone_log import DroneLogs
+from vision import DetectorRT
 
 import cflib
 
@@ -30,7 +30,7 @@ RADIO_CHANNELS = {
   "9": "radio://0/80/2M/E7E7E7E7E9"
 }
 
-def run(connection_type, swarm_uris=None):
+def run(connection_type, use_vision=False, swarm_uris=None):
   cflib.crtp.init_drivers(enable_debug_driver=False)
   time.sleep(1.0)
 
@@ -44,18 +44,78 @@ def run(connection_type, swarm_uris=None):
   command = Command(drone=drone, 
                     drone_logger=drone_logger, 
                     swarm=swarm_cmd)
+  detector = None
+  vision_thread = None
+  stop_vision = threading.Event()
 
   try:
+    logger.info("==========Connecting to drone==========")
     drone.connect()
-    time.sleep(5) # 5 second wait
-    
+    time.sleep(5.0)
+
+    if use_vision:
+      logger.info("==========Connecting to OpenCV==========")
+      detector = DetectorRT(
+        dictionary="4x4_1000",
+        camera=2,
+        calib_path=None,
+        marker_length_m=None,
+        draw_axes=True,
+        # Draw grid
+        draw_grid=True,
+        grid_step_px=40,
+        draw_rule_of_thirds=False,
+        draw_crosshair=False
+      )
+      detector.open()
+
+      def _vision_loop():
+        # Loop to display annotated frames
+        while not stop_vision.is_set():
+          frame, results = detector.read()
+          if frame is None:
+            continue
+          # Log detections
+          ids = results.get("ids")
+          if ids is not None:
+            try:
+              flat_ids = [int(x[0]) for x in ids]
+            except Exception:
+              pass
+
+          try:
+            cv2.imshow("Intelligent Drone Swarm (ArUco)", frame)
+            if (cv2.waitKey(1) & 0xFF) == 27:  # ESC to close vision
+              stop_vision.set()
+              break
+          except Exception:
+            pass
+
+      vision_thread = threading.Thread(target=_vision_loop, daemon=True)
+      vision_thread.start()
+    time.sleep(5.0)
+
+    logger.info("==========Connecting to PyGame==========")
     command.pygame()
+    time.sleep(5.0)
   except KeyboardInterrupt:
     logger.debug("Operation interrupted by user.")
   except Exception as e:
     logger.error(f"Error: {e}")
     sys.exit(1)
   finally:
+    if detector:
+      stop_vision.set()
+      if vision_thread:
+        vision_thread.join(timeout=2.0)
+      try:
+        detector.release()
+      except Exception:
+        pass
+
+    if drone:
+      drone._cf.close_link()
+
     if swarm_cmd:
       swarm_cmd.land()
       swarm_cmd.close()
@@ -64,6 +124,7 @@ def print_usage():
   print("Usage:")
   print("  python main.py udp")
   print("  python main.py radio [7|8|9]")
+  print("  (append 'vision' to enable ArUco webcam)")
   print("  python main.py swarm <channels ...> # e.g. swarm 7, 8, 9")
   sys.exit(1)
 
@@ -74,6 +135,7 @@ if __name__ == '__main__':
 
   arg = sys.argv[1].lower()
   connection_type = None
+  use_vision = False
 
   if arg == "udp":
     connection_type = UDP
@@ -87,27 +149,14 @@ if __name__ == '__main__':
     else:
       logger.error(f"Invalid radio channel: {channel}")
       print_usage()
-  elif arg == "swarm":
-    if len(sys.argv) < 3:
-      logger.error("Provide at least one radio channel for swarm.")
-      print_usage()
-
-    channels = sys.argv[2:]
-    bad = [c for c in channels if c not in RADIO_CHANNELS]
-    if bad:
-      logger.error(f"Invalid radio channel(s): {', '.join(bad)}")
-      print_usage()
-
-    # For single-drone reference (left panel) pick the first for Command()
-    first = channels[0]
-    connection_type = RADIO_CHANNELS[first]
-    swarm_uris = [RADIO_CHANNELS[c] for c in channels]
-    logger.info(f"Swarm URIs: {swarm_uris}")
-    run(connection_type, swarm_uris=swarm_uris)
-    sys.exit(0)
   else:
     logger.error(f"Invalid connection type: {arg}")
     print_usage()
 
+  if len(sys.argv) >= 3 and sys.argv[-1].lower() == "vision":
+    use_vision = True
+  if len(sys.argv) >= 4 and sys.argv[3].lower() == "vision":
+    use_vision = True
+
   logger.info(f"Using connection: {connection_type}")
-  run(connection_type)
+  run(connection_type, use_vision=use_vision)
