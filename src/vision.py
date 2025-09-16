@@ -82,7 +82,6 @@ class DetectorRT:
       raise RuntimeError("Camera open failed.")
 
     # idk if this actuall does anything -- i just saw this on some tutorial
-    self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
     self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
     self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
     self.cap.set(cv2.CAP_PROP_FPS, self.fps)
