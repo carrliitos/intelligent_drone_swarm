@@ -30,7 +30,7 @@ RADIO_CHANNELS = {
   "9": "radio://0/80/2M/E7E7E7E7E9"
 }
 
-def run(connection_type, use_vision=False):
+def run(connection_type, use_vision=False, swarm_uris=None):
   cflib.crtp.init_drivers(enable_debug_driver=False)
   time.sleep(1.0)
 
@@ -40,7 +40,10 @@ def run(connection_type, use_vision=False):
   drone_logger = DroneLogs(drone)
   time.sleep(1.0)
 
-  command = Command(drone=drone, drone_logger=drone_logger)
+  swarm_cmd = SwarmCommand(swarm_uris) if swarm_uris else None
+  command = Command(drone=drone, 
+                    drone_logger=drone_logger, 
+                    swarm=swarm_cmd)
   detector = None
   vision_thread = None
   stop_vision = threading.Event()
@@ -108,11 +111,16 @@ def run(connection_type, use_vision=False):
     if drone:
       drone._cf.close_link()
 
+    if swarm_cmd:
+      swarm_cmd.land()
+      swarm_cmd.close()
+
 def print_usage():
   print("Usage:")
   print("  python main.py udp")
   print("  python main.py radio [7|8|9]")
   print("  (append 'vision' to enable ArUco webcam)")
+  print("  python main.py swarm <channels ...> # e.g. swarm 7, 8, 9")
   sys.exit(1)
 
 if __name__ == '__main__':
