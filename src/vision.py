@@ -86,6 +86,24 @@ class DetectorRT:
     self.draw_rule_of_thirds = draw_rule_of_thirds
     self.draw_crosshair = draw_crosshair
 
+    # Occupy grid for the detected ArUco marker
+    self.highlight_occupied: bool = True
+    self.occupied_color: Tuple[int, int, int] = (40, 40, 200) # BGR (red-ish(?))
+    self.occupied_alpha: float = 0.35                         # 0..1 fill opacity
+    self._occupied_cells = set()
+
+  def _point_to_cell(self, x: float, y: float, w: int, h: int):
+    """
+    Maps the pixel (x, y) to (row, col) in the grid.
+    """
+    pass
+
+  def _mark_occupied(self, frame: np.ndarray):
+    """
+    Alpha-fill currently occupied cell and then draw the grid lines on top of it.
+    """
+    pass
+
   def _overlay_grid(self, frame: np.ndarray):
     h, w = frame.shape[:2]
 
