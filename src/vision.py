@@ -256,9 +256,17 @@ class DetectorRT:
     corners, ids, _ = self.detector.detectMarkers(frame)
     rvecs = tvecs = None
     dists: List[float] = []
+    self._occupied_cells = set()
 
     if ids is not None and len(ids) > 0:
       cv2.aruco.drawDetectedMarkers(frame, corners, ids)
+      # centers -> occupied grid cells
+      h, w = frame.shape[:2]
+      for corner in corners:
+        center = np.mean(corner[0], axis=0)
+        cell = self._point_to_cell(center[0], center[1], w, h)
+        self._occupied_cells.add(cell)
+
       if self._do_pose:
         rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(corners, 
                                                               self.marker_length_m, 
@@ -277,6 +285,7 @@ class DetectorRT:
           dists = [float(np.linalg.norm(t)) for t in tvecs]
 
     self._overlay_grid(frame)
+    self._mark_occupied(frame)
 
     return {
       "ids": ids,
