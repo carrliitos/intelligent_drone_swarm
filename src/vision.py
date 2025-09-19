@@ -242,6 +242,7 @@ class DetectorRT:
     }
 
     self._overlay_grid(frame)
+    self._mark_occupied(frame) # Highlight the occupied cells and then draw grid
     self.last_results = results
 
     return frame, results
