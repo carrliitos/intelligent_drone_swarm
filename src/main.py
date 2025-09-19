@@ -122,13 +122,13 @@ def run(connection_type, use_vision=False, swarm_uris=None):
 
 def print_usage():
   print("Usage:")
-  print("  python main.py udp")
-  print("  python main.py radio [7|8|9]")
+  print("  fly udp")
+  print("  fly radio [7|8|9]")
   print("  (append 'vision' to enable ArUco webcam)")
-  print("  python main.py swarm <channels ...> # e.g. swarm 7, 8, 9")
+  print("  fly swarm <channels ...> # e.g. swarm 7, 8, 9")
   sys.exit(1)
 
-if __name__ == '__main__':
+def cli():
   if len(sys.argv) < 2:
     logger.error("Missing connection type argument.")
     print_usage()
@@ -160,3 +160,6 @@ if __name__ == '__main__':
 
   logger.info(f"Using connection: {connection_type}")
   run(connection_type, use_vision=use_vision)
+
+if __name__ == '__main__':
+  cli()
