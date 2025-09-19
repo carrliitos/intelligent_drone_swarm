@@ -1,4 +1,4 @@
-# Drone Swarm Coordination System
+# NEST - Networked Ensemble of Swarm Things
 
 ## Team
 
