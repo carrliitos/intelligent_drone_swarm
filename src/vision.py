@@ -96,7 +96,10 @@ class DetectorRT:
     """
     Maps the pixel (x, y) to (row, col) in the grid.
     """
-    pass
+    step = max(1, self.grid_step_px)
+    col = int(np.clip(x, 0, w - 1)) // step
+    row = int(np.clip(y, 0, h - 1)) // step
+    return (row, col)
 
   def _mark_occupied(self, frame: np.ndarray):
     """
