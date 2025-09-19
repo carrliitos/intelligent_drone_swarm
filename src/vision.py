@@ -86,6 +86,43 @@ class DetectorRT:
     self.draw_rule_of_thirds = draw_rule_of_thirds
     self.draw_crosshair = draw_crosshair
 
+    # Occupy grid for the detected ArUco marker
+    self.highlight_occupied: bool = True
+    self.occupied_color: Tuple[int, int, int] = (40, 40, 200) # BGR (red-ish(?))
+    self.occupied_alpha: float = 0.75                         # 0..1 fill opacity
+    self._occupied_cells = set()                              # A set of {(row, col), ...}
+
+  def _point_to_cell(self, x: float, y: float, w: int, h: int):
+    """
+    Maps the pixel (x, y) to (row, col) in the grid.
+    """
+    step = max(1, self.grid_step_px)
+    col = int(np.clip(x, 0, w - 1)) // step
+    row = int(np.clip(y, 0, h - 1)) // step
+    return (row, col)
+
+  def _mark_occupied(self, frame: np.ndarray):
+    """
+    Alpha-fill currently occupied cell and then draw the grid lines on top of it.
+    """
+    if not (self.draw_grid and self.highlight_occupied and self._occupied_cells):
+      self._overlay_grid(frame) # default to just drawing the grid and overlays and stuff
+      return
+
+    h, w = frame.shape[:2]
+    step = max(1, self.grid_step_px)
+
+    # Draw fills on an overlay
+    overlay = frame.copy()
+    for (row, col) in self._occupied_cells:
+      x0, y0 = col * step, row * step
+      x1, y1 = min(x0 + step - 1, w - 1), min(y0 + step - 1, h - 1)
+      cv2.rectangle(overlay, (x0, y0), (x1, y1), self.occupied_color, thickness=cv2.FILLED)
+    # Blend overaly to frame
+    cv2.addWeighted(overlay, self.occupied_alpha, frame, 1.0 - self.occupied_alpha, 0, frame)
+
+    self._overlay_grid(frame)
+
   def _overlay_grid(self, frame: np.ndarray):
     h, w = frame.shape[:2]
 
@@ -166,10 +203,19 @@ class DetectorRT:
     corners, ids, _ = self.detector.detectMarkers(frame)
     rvecs = tvecs = None
     dists: List[float] = []
+    # Reset the occupied cells per frame
+    self._occupied_cells = set()
 
     if ids is not None and len(ids) > 0:
       # Draw the detected boundaries and their IDs
       cv2.aruco.drawDetectedMarkers(frame, corners, ids)
+      # Compute centers and map to grid cells
+      h, w = frame.shape[:2]
+      for corner in corners:
+        # corner shape: (1, 4, 2) -> take the mean over the 4 corner points
+        center = np.mean(corner[0], axis=0) # x, y
+        cell = self._point_to_cell(center[0], center[1], w, h)
+        self._occupied_cells.add(cell)
 
       if self._do_pose:
         rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(corners, 
@@ -215,6 +261,7 @@ class DetectorRT:
     }
 
     self._overlay_grid(frame)
+    self._mark_occupied(frame) # Highlight the occupied cells and then draw grid
     self.last_results = results
 
     return frame, results
@@ -228,9 +275,17 @@ class DetectorRT:
     corners, ids, _ = self.detector.detectMarkers(frame)
     rvecs = tvecs = None
     dists: List[float] = []
+    self._occupied_cells = set()
 
     if ids is not None and len(ids) > 0:
       cv2.aruco.drawDetectedMarkers(frame, corners, ids)
+      # centers -> occupied grid cells
+      h, w = frame.shape[:2]
+      for corner in corners:
+        center = np.mean(corner[0], axis=0)
+        cell = self._point_to_cell(center[0], center[1], w, h)
+        self._occupied_cells.add(cell)
+
       if self._do_pose:
         rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(corners, 
                                                               self.marker_length_m, 
@@ -249,6 +304,7 @@ class DetectorRT:
           dists = [float(np.linalg.norm(t)) for t in tvecs]
 
     self._overlay_grid(frame)
+    self._mark_occupied(frame)
 
     return {
       "ids": ids,
