@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "intelligent-drone-swarm"
+version = "2.4.0"
+requires-python = ">=3.10"
+dependencies = [
+  "cflib",
+  "importlib_resources",
+  "libusb-package",
+  "numpy",
+  "opencv-contrib-python",
+  "opencv-python",
+  "packaging",
+  "scipy",
+  "watchdog",
+  "pandas",
+  "pygame"
+]
+description = "UW-Whitewater MSCS Capstone: Drone Swarm Coordination System"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [
+  { name = "Benzon Carlitos Salazar", email = "salazarbc24@uww.edu" },
+  { name = "Griffin Polly", email = "pollygs14@uww.edu" },
+  { name = "Kevin King", email = "kingk20@uww.edu" },
+  { name = "Anjali Gupta", email = "guptaam23@uww.edu" }
+]
+
+[project.scripts]
+fly = "main:cli"
+
+[tool.setuptools.package-dir]
+"" = "src"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools]
+py-modules = [
+  "main",
+  "command",
+  "drone_connection",
+  "drone_log",
+  "drone_log_plot",
+  "swarm_command",
+  "vision"
+]
