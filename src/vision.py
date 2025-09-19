@@ -90,7 +90,7 @@ class DetectorRT:
     self.highlight_occupied: bool = True
     self.occupied_color: Tuple[int, int, int] = (40, 40, 200) # BGR (red-ish(?))
     self.occupied_alpha: float = 0.35                         # 0..1 fill opacity
-    self._occupied_cells = set()
+    self._occupied_cells = set()                              # A set of {(row, col), ...}
 
   def _point_to_cell(self, x: float, y: float, w: int, h: int):
     """
@@ -184,10 +184,19 @@ class DetectorRT:
     corners, ids, _ = self.detector.detectMarkers(frame)
     rvecs = tvecs = None
     dists: List[float] = []
+    # Reset the occupied cells per frame
+    self._occupied_cells = set()
 
     if ids is not None and len(ids) > 0:
       # Draw the detected boundaries and their IDs
       cv2.aruco.drawDetectedMarkers(frame, corners, ids)
+      # Compute centers and map to grid cells
+      h, w = frame.shape[:2]
+      for corner in corners:
+        # corner shape: (1, 4, 2) -> take the mean over the 4 corner points
+        center = np.mean(corner[0], axis=0) # x, y
+        cell = self._point_to_cell(center[0], center[1], w, h)
+        self._occupied_cells.add(cell)
 
       if self._do_pose:
         rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(corners, 
