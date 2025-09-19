@@ -105,7 +105,23 @@ class DetectorRT:
     """
     Alpha-fill currently occupied cell and then draw the grid lines on top of it.
     """
-    pass
+    if not (self.draw_grid and self.highlight_occupied and self._occupied_cells):
+      self._overlay_grid(frame) # default to just drawing the grid and overlays and stuff
+      return
+
+    h, w = frame.shape[:2]
+    step = max(1, self.grid_step_px)
+
+    # Draw fills on an overlay
+    overlay = frame.copy()
+    for (row, col) in self._occupied_cells:
+      x0, y0 = col * step, row * step
+      x1, y1 = min(x0 + step - 1, w - 1), min(y0 + step - 1, h - 1)
+      cv2.rectangle(overlay, (x0, y0), (x1, y1), self.occupied_color, thickness=cv2.FILLED)
+    # Blend overaly to frame
+    cv2.addWeighted(overlay, self.occupied_alpha, frame, 1.0 - self.occupied_alpha, 0, frame)
+
+    self._overlay_grid(frame)
 
   def _overlay_grid(self, frame: np.ndarray):
     h, w = frame.shape[:2]
