@@ -89,7 +89,7 @@ class DetectorRT:
     # Occupy grid for the detected ArUco marker
     self.highlight_occupied: bool = True
     self.occupied_color: Tuple[int, int, int] = (40, 40, 200) # BGR (red-ish(?))
-    self.occupied_alpha: float = 0.35                         # 0..1 fill opacity
+    self.occupied_alpha: float = 0.75                         # 0..1 fill opacity
     self._occupied_cells = set()                              # A set of {(row, col), ...}
 
   def _point_to_cell(self, x: float, y: float, w: int, h: int):
