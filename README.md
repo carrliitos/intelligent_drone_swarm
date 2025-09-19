@@ -1,4 +1,4 @@
-# Drone Swarm Coordination System
+# NEST - Networked Ensemble of Swarm Things
 
 ## Team
 
@@ -28,3 +28,48 @@ autonomously to external stimuli (e.g., following a moving target or converging 
 
 - **Proof-of-Concept Demonstration**: Validate a centralized architecture where the external CV system issues commands to 
 multiple Crazyflies, showcasing potential use cases in autonomous coordination.
+
+## Getting Started
+
+### 1. Clone the Repository
+```bash
+git clone https://github.com/carrliitos/intelligent_drone_swarm.git
+cd intelligent_drone_swarm
+````
+
+### 2. Create and Activate a Virtual Environment
+
+Linux/macOS:
+
+```bash
+python3 -m venv venv
+source venv/bin/activate
+```
+
+Windows (PowerShell):
+
+```powershell
+python -m venv venv
+.\venv\Scripts\Activate.ps1
+```
+
+### 3. Install in Editable Mode
+
+Dependencies are defined in `pyproject.toml`.
+
+```bash
+python -m pip install --upgrade pip setuptools wheel
+python -m pip install -e .
+```
+
+This sets up the `fly` command in your venv.
+
+### 4. Run the Drone CLI
+
+Basic usage:
+
+```bash
+fly udp
+fly radio 7
+fly radio 8 vision
+```
