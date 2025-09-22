@@ -23,6 +23,8 @@ logger_name = Path(__file__).stem
 logger_file = f"{directory}/logs/{logger_file_name}.log"
 logger = logger.setup_logger(logger_name, logger_file)
 
+calibration_path = f"{directory}/src/utils/calibration_imgs/cam_param.npz"
+
 UDP = "udp://192.168.43.51:2390"
 RADIO_CHANNELS = {
   "7": "radio://0/80/2M/E7E7E7E7E7",
@@ -58,11 +60,11 @@ def run(connection_type, use_vision=False, swarm_uris=None):
       detector = DetectorRT(
         dictionary="4x4_1000",
         camera=2,
-        calib_path=None,
-        marker_length_m=None,
-        draw_axes=True,
+        calib_path=calibration_path,
+        marker_length_m=0.025,
+        draw_axes=False,
         # Draw grid
-        draw_grid=True,
+        draw_grid=False,
         grid_step_px=40,
         draw_rule_of_thirds=False,
         draw_crosshair=False
