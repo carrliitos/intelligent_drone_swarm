@@ -45,7 +45,8 @@ def run(connection_type, use_vision=False, swarm_uris=None):
   swarm_cmd = SwarmCommand(swarm_uris) if swarm_uris else None
   command = Command(drone=drone, 
                     drone_logger=drone_logger, 
-                    swarm=swarm_cmd)
+                    swarm=swarm_cmd,
+                    takeoff_alt=0.25)
   detector = None
   vision_thread = None
   stop_vision = threading.Event()
@@ -95,6 +96,22 @@ def run(connection_type, use_vision=False, swarm_uris=None):
 
       vision_thread = threading.Thread(target=_vision_loop, daemon=True)
       vision_thread.start()
+
+      ctrl_stop = threading.Event()
+      def _ctrl_loop():
+        try:
+          command.follow_target_ibvs(
+            detector=detector,
+            stop_event=ctrl_stop,
+            desired_area_px=10000,
+            loop_hz=20,
+            use_vertical=False
+          )
+        except Exception as e:
+          logger.error(f"IBVS error: {e}")
+      ctrl_thread = threading.Thread(target=_ctrl_loop, daemon=True)
+      ctrl_thread.start()
+
     time.sleep(5.0)
 
     logger.info("==========Connecting to PyGame==========")
@@ -111,6 +128,10 @@ def run(connection_type, use_vision=False, swarm_uris=None):
       if vision_thread:
         vision_thread.join(timeout=2.0)
       try:
+        ctrl_stop.set()
+        if 'ctrl_thread' in locals():
+          ctrl_thread.join(timeout=2.0)
+
         detector.release()
       except Exception:
         pass
