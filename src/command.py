@@ -24,7 +24,8 @@ class Command:
   def __init__(self, 
                drone: DroneConnection, 
                drone_logger: DroneLogs, 
-               swarm: SwarmCommand | None = None):
+               swarm: SwarmCommand | None = None,
+               takeoff_alt: float = 0.5):
     """
     Handles thrust commands for the drone.
 
@@ -45,13 +46,13 @@ class Command:
     self.mc = None
     self.manual_active = False
     self.swarm_active = False
-    self._l_was_down = False     # for 'L' edge detection
-    self._g_was_down = False     # for 'G' edge detection (enter manual)
-    self._s_was_down = False     # for 'S' edge (enter swarm manual)
-    self.speed_xy = 0.50         # m/s
-    self.speed_z  = 0.50         # m/s
-    self.yaw_rate = 90.0         # deg/s
-    self.takeoff_alt = 0.5       # m
+    self._l_was_down = False      # for 'L' edge detection
+    self._g_was_down = False      # for 'G' edge detection (enter manual)
+    self._s_was_down = False      # for 'S' edge (enter swarm manual)
+    self.speed_xy = 0.50          # m/s
+    self.speed_z  = 0.50          # m/s
+    self.yaw_rate = 90.0          # deg/s
+    self.takeoff_alt = takeoff_alt # m
 
   def _wait_for_param_download(self):
     logger.info("Waiting for parameters to be downloaded.")
@@ -344,17 +345,6 @@ class Command:
     """
     Image-based Visual Servo: Center the target (yaw) and hold distance
     """
-    # Takeoff + estimator prep
-    self._reset_estimator()
-    if self.mc is None:
-      self.mc = MotionCommander(self.scf)
-
-    # Might remove this -- seems redundant
-    try:
-      self.mc.take_off(self.takeoff_alt, velocity=0.4)
-    except Exception:
-      pass
-
     dt = 1.0 / loop_hz
     halfW = halfH = None
 
