@@ -4,6 +4,7 @@ import pandas as pd
 import sys
 import pygame
 from pathlib import Path
+from collections import deque
 
 from cflib.crazyflie.log import LogConfig
 from cflib.crazyflie.syncLogger import SyncLogger
@@ -13,6 +14,7 @@ from utils import logger, context
 from drone_connection import DroneConnection
 from drone_log import DroneLogs
 from swarm_command import SwarmCommand
+from vision import primary_target
 
 directory = context.get_context(os.path.abspath(__file__))
 logger_file_name = Path(directory).stem
@@ -333,11 +335,115 @@ class Command:
       self.drone._cf.commander.send_notify_setpoint_stop()
       pygame.quit()
 
-  def follow_target_ibvs():
+  def follow_target_ibvs(self, 
+                         detector, 
+                         stop_event,
+                         desired_area_px=1000, # time for 25mm tag
+                         min_conf_frames=2,    # require N consecutive frame
+                         loop_hz=20,
+                         use_vetical=False):
     """
     Image-based Visual Servo: Center the target (yaw) and hold distance
     """
-    pass
+    # Takeoff + estimator prep
+    self._reset_estimator()
+    if self.mc is None:
+      self.mc = MotionCommander(self.scf)
+
+    # Might remove this -- seems redundant
+    try:
+      self.mc.take_off(self.takeoff_alt, velocity=0.4)
+    except Exception:
+      pass
+
+    dt = 1.0 / loop_hz
+    halfW = halfH = None
+
+    # Minimal PD gains
+    yaw_kp, yaw_kd = 100.0, 15.0 # deg/s per unit normalized pixel
+    fwd_kp, fwd_kd = 0.50, 0.10  # m/s per unit distance error
+    vrt_kp, vrt_kd = 0.40, 0.10  # m/s per unit vertical error
+
+    # Clamps and headbands
+    yaw_max, vx_max, vz_max = 180.0, 0.30, 0.25
+    db_px, db_dist = 0.02, 0.02
+
+    # derivative memory
+    ex_prev = ed_prev = ey_prev = None
+
+    ok_streak = 0
+    last_ok = time.time()
+    fail_hover_s, fail_land_s = 0.5, 2.0
+
+    while not stop_event.is_set():
+      t0 = time.time()
+      frame, res = detector.read()
+      if frame is None:
+        time.sleep(dt)
+        continue
+
+      # pull the centroid + area
+      tgt = None
+      try:
+        tgt = primary_target(res, frame.shape)
+      except Exception:
+        tgt = None
+
+      if not tgt:
+        # lost -> hover, maybe land
+        self.mc.stop()
+        if (time.time() - last_ok) > fail_land_s:
+          try: 
+            self.mc.land(velocity=0.2)
+          finally: 
+            return
+        time.sleep(dt)
+        continue
+
+      # we have a detection
+      last_ok = time.time()
+      ok_streak = min_conf_frames
+
+      cx, cy, area, W, H = tgt
+      if halfW is None: 
+        halfW, halfH = W / 2.0, H / 2.0
+
+      # normalized errors
+      ex = (cx - halfW) / halfW          # [-1,1], horizontal pixel error → yaw
+      ey = (cy - halfH) / halfH          # vertical pixel error → vz (optional)
+      ed = (desired_area_px - max(area, 1.0)) / max(desired_area_px, 1.0)
+
+      # deadbands
+      if abs(ex) < db_px:
+        ex = 0.0
+      if abs(ey) < db_px:
+        ey = 0.0
+      if abs(ed) < db_dist:
+        ed = 0.0
+
+      # finite diffs (derivative)
+      ex_d = 0.0 if ex_prev is None else (ex - ex_prev) / dt
+      ed_d = 0.0 if ed_prev is None else (ed - ed_prev) / dt
+      ey_d = 0.0 if ey_prev is None else (ey - ey_prev) / dt
+      ex_prev, ed_prev, ey_prev = ex, ed, ey
+
+      # PD to commands
+      yaw_rate = (yaw_kp * ex) + (yaw_kd * ex_d) # deg/s
+      vx = (fwd_kp * ed) + (fwd_kd * ed_d)       # m/s
+      vz = ((vrt_kp * ey) + (vrt_kd * ey_d)) if use_vertical else 0.0
+
+      # clamps
+      yaw_rate = max(-yaw_max, min(yaw_max, yaw_rate))
+      vx = max(-vx_max, min(vx_max,   vx))
+      vz = max(-vz_max, min(vz_max,   vz))
+
+      # send setpoint (vy=0 for simplicity)
+      self.mc.start_linear_motion(vx, 0.0, vz, rate_yaw=yaw_rate)
+
+      # pacing
+      elapsed = time.time() - t0
+      if elapsed < dt:
+        time.sleep(dt - elapsed)
 
 class _KeySnapshot:
   """
