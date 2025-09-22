@@ -333,6 +333,12 @@ class Command:
       self.drone._cf.commander.send_notify_setpoint_stop()
       pygame.quit()
 
+  def follow_target_ibvs():
+    """
+    Image-based Visual Servo: Center the target (yaw) and hold distance
+    """
+    pass
+
 class _KeySnapshot:
   """
   Inner class adapter for SwarmCommand so that SwarmCommand doesn't depend on pygame.
