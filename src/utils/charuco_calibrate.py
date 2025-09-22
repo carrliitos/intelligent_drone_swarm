@@ -32,7 +32,7 @@ def main():
 
   all_corners = []
   all_ids = []
-  image_size = None
+  image_size = [640, 480] # 640x480
 
   detector = cv2.aruco.ArucoDetector(aruco_dict, cv2.aruco.DetectorParameters())
 
