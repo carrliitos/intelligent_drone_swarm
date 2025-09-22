@@ -8,6 +8,9 @@ data/*.csv
 !data/.gitkeep
 data/figs/*.png
 !data/figs/.gitkeep
+src/utils/calibration_imgs/*
+!src/utils/calibration_imgs/.gitkeep
+!src/utils/calibration_imgs/ChArUco_Marker.png
 
 docs/*
 !docs/.gitkeep
