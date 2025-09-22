@@ -345,6 +345,16 @@ class Command:
     """
     Image-based Visual Servo: Center the target (yaw) and hold distance
     """
+    # Takeoff
+    if self.mc is None:
+      self.mc = MotionCommander(self.scf)
+
+    # Might remove this -- seems redundant
+    try:
+      self.mc.take_off(self.takeoff_alt, velocity=0.4)
+    except Exception:
+      pass
+
     dt = 1.0 / loop_hz
     halfW = halfH = None
 
@@ -423,8 +433,8 @@ class Command:
 
       # clamps
       yaw_rate = max(-yaw_max, min(yaw_max, yaw_rate))
-      vx = max(-vx_max, min(vx_max,   vx))
-      vz = max(-vz_max, min(vz_max,   vz))
+      vx = max(-vx_max, min(vx_max, vx))
+      vz = max(-vz_max, min(vz_max, vz))
 
       # send setpoint (vy=0 for simplicity)
       self.mc.start_linear_motion(vx, 0.0, vz, rate_yaw=yaw_rate)
