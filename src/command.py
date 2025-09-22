@@ -14,7 +14,6 @@ from utils import logger, context
 from drone_connection import DroneConnection
 from drone_log import DroneLogs
 from swarm_command import SwarmCommand
-from vision import primary_target
 
 directory = context.get_context(os.path.abspath(__file__))
 logger_file_name = Path(directory).stem
@@ -341,7 +340,7 @@ class Command:
                          desired_area_px=1000, # time for 25mm tag
                          min_conf_frames=2,    # require N consecutive frame
                          loop_hz=20,
-                         use_vetical=False):
+                         use_vertical=False):
     """
     Image-based Visual Servo: Center the target (yaw) and hold distance
     """
@@ -385,7 +384,7 @@ class Command:
       # pull the centroid + area
       tgt = None
       try:
-        tgt = primary_target(res, frame.shape)
+        tgt = vision.primary_target(res, frame.shape)
       except Exception:
         tgt = None
 
