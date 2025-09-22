@@ -314,6 +314,21 @@ class DetectorRT:
       "dist_m": dists,
     }
 
+  def primary_target(results, frame_shape):
+    """
+    Return (cx, cy, area_px) of the first detected marker, or None.
+    """
+    corners = results.get("corners")
+    if not corners:
+      return None
+    # corners[i]: shape (1, 4, 2); take mean for centroid & polygon area
+    c = corners[0][0]             # (4,2)
+    cx, cy = float(c[:,0].mean()), float(c[:,1].mean())
+    # approximate area by contour area (pixel^2)
+    area = float(cv2.contourArea(c.astype(np.float32)))
+    H, W = frame_shape[:2]
+    return (cx, cy, area, W, H)
+
   @staticmethod
   def _load_calibration(npz_path: str):
     calib_p = Path(npz_path)
