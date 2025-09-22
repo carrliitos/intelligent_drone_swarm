@@ -105,7 +105,7 @@ def run(connection_type, use_vision=False, swarm_uris=None):
             stop_event=ctrl_stop,
             desired_area_px=10000,
             loop_hz=20,
-            use_vertical=False
+            use_vertical=True
           )
         except Exception as e:
           logger.error(f"IBVS error: {e}")
