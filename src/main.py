@@ -60,7 +60,7 @@ def run(connection_type, use_vision=False, swarm_uris=None):
       logger.info("==========Connecting to OpenCV==========")
       detector = DetectorRT(
         dictionary="4x4_1000",
-        camera=0,
+        camera=2,
         calib_path=calibration_path,
         marker_length_m=0.025,
         draw_axes=False,

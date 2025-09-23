@@ -303,34 +303,29 @@ class Command:
             except Exception as e:
               logger.warning(f"Failed to reconnect primary link: {e}")
 
+        # IBVS TOGGLE: Numpad '1' enables/disables vision-follow
         kp1_down = keys[pygame.K_KP1]
         if not hasattr(self, "_kp1_was_down"):
           self._kp1_was_down = False
-
         if kp1_down and not self._kp1_was_down and not self.swarm_active:
-          # toggle on/off
           self.ibvs_enabled = not self.ibvs_enabled
           if self.ibvs_enabled:
-            # enabled IBVS (controller thread will start commanding)
             self.ibvs_enable_event.set()
-            # if not flying, then take off (no-op if already fliying)
             if self.mc is None:
               self.mc = MotionCommander(self.scf)
             try:
               self.mc.take_off(self.takeoff_alt, velocity=0.4)
             except Exception:
               pass
-            logger.info("IBVS: ENABLED (keypad 1)")
+            logger.info("IBVS: ENABLED (Numpad 1)")
           else:
-            # disable IBVS (controller thread hovers but stays alive)
             self.ibvs_enable_event.clear()
-            # ensure hover wjhen disabling
             try:
               if self.mc:
                 self.mc.stop()
             except Exception:
               pass
-            logger.info("IBVS: DISABLED (keypad 1)")
+            logger.info("IBVS: DISABLED (Numpad 1)")
         self._kp1_was_down = kp1_down
 
         # Per-frame control
@@ -349,11 +344,17 @@ class Command:
           "L           | Single-Drone Land / Exit Manual",
           "S           | SWARM Manual (take off all)",
           "K           | SWARM Land / Exit Manual",
+          "Numpad 1    | Toggle Vision Follow (IBVS) on/off",
           "Arrow Keys  | Move (Forward, Back, Left, Right)",
           "A / D       | Yaw left / right",
           "R / F       | Altitude up / down",
           "Backspace   | Exit program"
         ]
+
+        # Status HUD line
+        status = f"IBVS: {'ON' if self.ibvs_enabled else 'OFF'} | Manual: {self.manual_active} | Swarm: {self.swarm_active}"
+        text = font.render(status, True, (180, 220, 255))
+        screen.blit(text, (20, 20 + len(instructions) * 25))
 
         for i, line in enumerate(instructions):
           text = font.render(line, True, (255, 255, 255))
