@@ -371,8 +371,8 @@ class Command:
 
   def follow_target_ibvs(self, 
                          detector, 
-                         start_event=None,
                          stop_event,
+                         start_event=None,
                          desired_area_px=1000, # time for 25mm tag
                          min_conf_frames=2,    # require N consecutive frame
                          loop_hz=20,
