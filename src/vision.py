@@ -319,7 +319,7 @@ class DetectorRT:
     Return (cx, cy, area_px) of the first detected marker, or None.
     """
     corners = results.get("corners")
-    if not corners:
+    if corners is None or len(corners) == 0:
       return None
     # corners[i]: shape (1, 4, 2); take mean for centroid & polygon area
     c = corners[0][0]             # (4,2)
