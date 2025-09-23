@@ -103,6 +103,7 @@ def run(connection_type, use_vision=False, swarm_uris=None):
           command.follow_target_ibvs(
             detector=detector,
             stop_event=ctrl_stop,
+            start_event=command.ibvs_enable_event,
             desired_area_px=10000,
             loop_hz=20,
             use_vertical=True
