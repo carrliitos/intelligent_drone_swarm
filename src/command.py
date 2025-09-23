@@ -3,6 +3,7 @@ import os
 import pandas as pd
 import sys
 import pygame
+import threading
 from pathlib import Path
 from collections import deque
 
@@ -53,6 +54,9 @@ class Command:
     self.speed_z  = 0.50          # m/s
     self.yaw_rate = 90.0          # deg/s
     self.takeoff_alt = takeoff_alt # m
+
+    self.ibvs_enable_event = threading.Event()   # pressed KP1 -> set; pressed again -> clear
+    self.ibvs_enabled = False
 
   def _wait_for_param_download(self):
     logger.info("Waiting for parameters to be downloaded.")
@@ -298,6 +302,36 @@ class Command:
                 self._reset_estimator()
             except Exception as e:
               logger.warning(f"Failed to reconnect primary link: {e}")
+
+        kp1_down = keys[pygame.K_KP1]
+        if not hasattr(self, "_kp1_was_down"):
+          self._kp1_was_down = False
+
+        if kp1_down and not self._kp1_was_down and not self.swarm_active:
+          # toggle on/off
+          self.ibvs_enabled = not self.ibvs_enabled
+          if self.ibvs_enabled:
+            # enabled IBVS (controller thread will start commanding)
+            self.ibvs_enable_event.set()
+            # if not flying, then take off (no-op if already fliying)
+            if self.mc is None:
+              self.mc = MotionCommander(self.scf)
+            try:
+              self.mc.take_off(self.takeoff_alt, velocity=0.4)
+            except Exception:
+              pass
+            logger.info("IBVS: ENABLED (keypad 1)")
+          else:
+            # disable IBVS (controller thread hovers but stays alive)
+            self.ibvs_enable_event.clear()
+            # ensure hover wjhen disabling
+            try:
+              if self.mc:
+                self.mc.stop()
+            except Exception:
+              pass
+            logger.info("IBVS: DISABLED (keypad 1)")
+        self._kp1_was_down = kp1_down
 
         # Per-frame control
         if self.swarm_active:
