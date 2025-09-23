@@ -371,6 +371,7 @@ class Command:
 
   def follow_target_ibvs(self, 
                          detector, 
+                         start_event=None,
                          stop_event,
                          desired_area_px=1000, # time for 25mm tag
                          min_conf_frames=2,    # require N consecutive frame
@@ -403,13 +404,30 @@ class Command:
 
     # derivative memory
     ex_prev = ed_prev = ey_prev = None
-
-    ok_streak = 0
     last_ok = time.time()
     fail_hover_s, fail_land_s = 0.5, 2.0
 
     while not stop_event.is_set():
       t0 = time.time()
+
+      # 1: IBVS enabled gate; wait for keypad '1'
+      if start_event is not None and not start_event.is_set():
+        try:
+          self.mc.stop() # This hovers while disabled
+        except Exception:
+          pass
+        time.sleep(dt)
+        continue
+
+      # 2: Arbitration; yield to manual/swarm
+      if self.manual_active or self.swarm_active:
+        try:
+          self.mc.stop() # This hovers while the user is still in control
+        except Exception:
+          pass
+          time.sleep(dt)
+          continue
+
       frame, res = detector.read()
       if frame is None:
         time.sleep(dt)
@@ -423,20 +441,20 @@ class Command:
         tgt = None
 
       if not tgt:
-        # lost -> hover, maybe land
+        # Lost target: hover; land only if IBVS remains enabled and target gone for a while
         self.mc.stop()
         if (time.time() - last_ok) > fail_land_s:
-          try: 
-            self.mc.land(velocity=0.2)
-          finally: 
-            return
+          # Only auto-land if still enabled (avoid fighting operator)
+          if start_event is None or start_event.is_set():
+            try: 
+              self.mc.land(velocity=0.2)
+            finally: 
+              return
         time.sleep(dt)
         continue
 
       # we have a detection
       last_ok = time.time()
-      ok_streak = min_conf_frames
-
       cx, cy, area, W, H = tgt
       if halfW is None: 
         halfW, halfH = W / 2.0, H / 2.0
