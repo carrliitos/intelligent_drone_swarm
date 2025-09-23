@@ -159,6 +159,7 @@ class Command:
           # Already flying? That's fine; continue.
           pass
         self.manual_active = True
+        self.ibvs_enable_event.set()
       self._g_was_down = g_down
       # Not in manual yet, nothing else to do this frame
       return
@@ -173,6 +174,7 @@ class Command:
       finally:
         self.mc = None
         self.manual_active = False
+        self.ibvs_enable_event.clear()
       self._l_was_down = l_down
       return
     self._l_was_down = l_down
@@ -255,6 +257,7 @@ class Command:
           except Exception:
             pass
           self.manual_active = True
+
         self._g_was_down = g_down
 
         # SWARM MANUAL (S to enter, K to land/exit)
@@ -278,6 +281,7 @@ class Command:
           self.swarm.enter_manual()
 
           self.swarm_active = True
+          self.ibvs_enable_event.set()
         self._s_was_down = s_down
 
         # LAND/EXIT: single(L) vs swarm(K)
@@ -287,12 +291,14 @@ class Command:
           finally:
             self.mc = None
             self.manual_active = False
+            self.ibvs_enable_event.clear()
 
         if self.swarm_active and keys[pygame.K_k]:
           try:
             self.swarm.land()
           finally:
             self.swarm_active = False
+            self.ibvs_enable_event.clear()
             # Reconnect primary link so single-drone controls work again
             try:
               if hasattr(self.drone, "_cf") and hasattr(self.drone, "link_uri"):
@@ -302,31 +308,6 @@ class Command:
                 self._reset_estimator()
             except Exception as e:
               logger.warning(f"Failed to reconnect primary link: {e}")
-
-        # IBVS TOGGLE: Numpad '1' enables/disables vision-follow
-        kp1_down = keys[pygame.K_KP1]
-        if not hasattr(self, "_kp1_was_down"):
-          self._kp1_was_down = False
-        if kp1_down and not self._kp1_was_down and not self.swarm_active:
-          self.ibvs_enabled = not self.ibvs_enabled
-          if self.ibvs_enabled:
-            self.ibvs_enable_event.set()
-            if self.mc is None:
-              self.mc = MotionCommander(self.scf)
-            try:
-              self.mc.take_off(self.takeoff_alt, velocity=0.4)
-            except Exception:
-              pass
-            logger.info("IBVS: ENABLED (Numpad 1)")
-          else:
-            self.ibvs_enable_event.clear()
-            try:
-              if self.mc:
-                self.mc.stop()
-            except Exception:
-              pass
-            logger.info("IBVS: DISABLED (Numpad 1)")
-        self._kp1_was_down = kp1_down
 
         # Per-frame control
         if self.swarm_active:
@@ -344,17 +325,11 @@ class Command:
           "L           | Single-Drone Land / Exit Manual",
           "S           | SWARM Manual (take off all)",
           "K           | SWARM Land / Exit Manual",
-          "Numpad 1    | Toggle Vision Follow (IBVS) on/off",
           "Arrow Keys  | Move (Forward, Back, Left, Right)",
           "A / D       | Yaw left / right",
           "R / F       | Altitude up / down",
           "Backspace   | Exit program"
         ]
-
-        # Status HUD line
-        status = f"IBVS: {'ON' if self.ibvs_enabled else 'OFF'} | Manual: {self.manual_active} | Swarm: {self.swarm_active}"
-        text = font.render(status, True, (180, 220, 255))
-        screen.blit(text, (20, 20 + len(instructions) * 25))
 
         for i, line in enumerate(instructions):
           text = font.render(line, True, (255, 255, 255))
