@@ -503,12 +503,12 @@ class _KeySnapshot:
   """
   def __init__(self, keys):
     import pygame
-    self.up    = keys[pygame.K_UP]
-    self.down  = keys[pygame.K_DOWN]
-    self.left  = keys[pygame.K_LEFT]
+    self.up = keys[pygame.K_UP]
+    self.down = keys[pygame.K_DOWN]
+    self.left = keys[pygame.K_LEFT]
     self.right = keys[pygame.K_RIGHT]
-    self.a     = keys[pygame.K_a]
-    self.d     = keys[pygame.K_d]
-    self.r     = keys[pygame.K_r]
-    self.f     = keys[pygame.K_f]
+    self.a = keys[pygame.K_a]
+    self.d = keys[pygame.K_d]
+    self.r = keys[pygame.K_r]
+    self.f = keys[pygame.K_f]
 
