@@ -354,17 +354,14 @@ class Command:
                          loop_hz=20,
                          use_vertical=False):
     """
-    Image-based Visual Servo: Center the target (yaw) and hold distance
+    IBVS is PASSIVE: it only runs while:
+      - start_event is set (G/S pressed), AND
+      - (self.manual_active or self.swarm_active) is True.
+    No auto-takeoff, no auto-hover/land here; PyGame owns flight state.
     """
     # Takeoff
     if self.mc is None:
       self.mc = MotionCommander(self.scf)
-
-    # Might remove this -- seems redundant
-    try:
-      self.mc.take_off(self.takeoff_alt, velocity=0.4)
-    except Exception:
-      pass
 
     dt = 1.0 / loop_hz
     halfW = halfH = None
@@ -380,60 +377,29 @@ class Command:
 
     # derivative memory
     ex_prev = ed_prev = ey_prev = None
-    last_ok = time.time()
-    fail_hover_s, fail_land_s = 0.5, 2.0
 
     while not stop_event.is_set():
       t0 = time.time()
 
-      # 1: IBVS enabled gate; wait for keypad '1'
-      if start_event is not None and not start_event.is_set():
-        try:
-          self.mc.stop() # This hovers while disabled
-        except Exception:
-          pass
+      # gate: only do someting while G/S flight modes are active
+      if (start_event is None or not start_event.is_set()) or not (self.manual_active or self.swarm_active):
+        # stay idle; do not hover or land here
         time.sleep(dt)
         continue
-
-      # 2: Arbitration; yield to manual/swarm
-      if self.manual_active or self.swarm_active:
-        try:
-          self.mc.stop() # This hovers while the user is still in control
-        except Exception:
-          pass
-          time.sleep(dt)
-          continue
 
       frame, res = detector.read()
       if frame is None:
         time.sleep(dt)
         continue
 
-      # pull the centroid + area
-      tgt = None
-      try:
-        tgt = vision.primary_target(res, frame.shape)
-      except Exception:
-        tgt = None
-
+      tgt = vision.primary_target(res, frame.shape)
       if not tgt:
-        # Lost target: hover; land only if IBVS remains enabled and target gone for a while
-        self.mc.stop()
-        if (time.time() - last_ok) > fail_land_s:
-          # Only auto-land if still enabled (avoid fighting operator)
-          if start_event is None or start_event.is_set():
-            try: 
-              self.mc.land(velocity=0.2)
-            finally: 
-              return
+        # no target? then do nothing (PyGame continues to command)
         time.sleep(dt)
         continue
 
-      # we have a detection
-      last_ok = time.time()
       cx, cy, area, W, H = tgt
-      if halfW is None: 
-        halfW, halfH = W / 2.0, H / 2.0
+      if halfW is None: halfW, halfH = W / 2.0, H / 2.0
 
       # normalized errors
       ex = (cx - halfW) / halfW          # [-1,1], horizontal pixel error → yaw
@@ -441,12 +407,9 @@ class Command:
       ed = (desired_area_px - max(area, 1.0)) / max(desired_area_px, 1.0)
 
       # deadbands
-      if abs(ex) < db_px:
-        ex = 0.0
-      if abs(ey) < db_px:
-        ey = 0.0
-      if abs(ed) < db_dist:
-        ed = 0.0
+      if abs(ex) < db_px: ex = 0.0
+      if abs(ey) < db_px: ey = 0.0
+      if abs(ed) < db_dist: ed = 0.0
 
       # finite diffs (derivative)
       ex_d = 0.0 if ex_prev is None else (ex - ex_prev) / dt
@@ -454,15 +417,10 @@ class Command:
       ey_d = 0.0 if ey_prev is None else (ey - ey_prev) / dt
       ex_prev, ed_prev, ey_prev = ex, ed, ey
 
-      # PD to commands
-      yaw_rate = (yaw_kp * ex) + (yaw_kd * ex_d) # deg/s
-      vx = (fwd_kp * ed) + (fwd_kd * ed_d)       # m/s
-      vz = ((vrt_kp * ey) + (vrt_kd * ey_d)) if use_vertical else 0.0
-
-      # clamps
-      yaw_rate = max(-yaw_max, min(yaw_max, yaw_rate))
-      vx = max(-vx_max, min(vx_max, vx))
-      vz = max(-vz_max, min(vz_max, vz))
+      # PD to commands + clamp
+      yaw_rate = max(-yaw_max, min(yaw_max, (yaw_kp  *ex) + (yaw_kd * ex_d))) # deg/s
+      vx = max(-vx_max, min(vx_max, (fwd_kp * ed) + (fwd_kd * ed_d)))         # m/s
+      vz = 0.0 if not use_vertical else max(-vz_max, min(vz_max, (vrt_kp * ey) + (vrt_kd * ey_d)))
 
       # send setpoint (vy=0 for simplicity)
       self.mc.start_linear_motion(vx, 0.0, vz, rate_yaw=yaw_rate)
