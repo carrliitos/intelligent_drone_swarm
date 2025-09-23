@@ -67,7 +67,7 @@ class Command:
 
   def _wait_for_position_estimator(self):
     cf = self.drone._cf
-    logger.info(f"[{cf.link_uri}] Waiting for estimator to find position...")
+    logger.info(f"{cf.link_uri}: Waiting for estimator to find position...")
 
     log_config = LogConfig(name='Kalman Variance', period_in_ms=self.period_ms)
     log_config.add_variable('kalman.varPX', 'float')
@@ -96,7 +96,7 @@ class Command:
           return True
 
         if time.time() - start > self.max_wait_sec:
-          logger.info(f"[WARN][{cf.link_uri}] Estimator not stable by {self.max_wait_sec}s "
+          logger.warn(f"{cf.link_uri}: Estimator not stable by {self.max_wait_sec}s "
                       f"(Δx={max_x-min_x:.4f}, Δy={max_y-min_y:.4f}, Δz={max_z-min_z:.4f})")
           return False
 
@@ -124,7 +124,7 @@ class Command:
     ok = self._wait_for_position_estimator()
 
     if not ok:
-      logger.info("Estimators not stable. Exiting...")
+      logger.error("Estimators not stable. Exiting...")
       time.sleep(1.0)
       sys.exit()
 
