@@ -96,8 +96,8 @@ class Command:
           return True
 
         if time.time() - start > self.max_wait_sec:
-          logger.warn(f"{cf.link_uri}: Estimator not stable by {self.max_wait_sec}s "
-                      f"(Δx={max_x-min_x:.4f}, Δy={max_y-min_y:.4f}, Δz={max_z-min_z:.4f})")
+          logger.warning(f"{cf.link_uri}: Estimator not stable by {self.max_wait_sec}s "
+                         f"(Δx={max_x-min_x:.4f}, Δy={max_y-min_y:.4f}, Δz={max_z-min_z:.4f})")
           return False
 
   def _reset_estimator(self):
