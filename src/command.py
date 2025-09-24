@@ -391,8 +391,8 @@ class Command:
         time.sleep(dt)
         continue
 
-      frame, res = detector.read()
-      if frame is None:
+      frame, res = detector.latest()
+      if frame is None or not res:
         time.sleep(dt)
         continue
 

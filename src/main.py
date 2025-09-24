@@ -105,6 +105,8 @@ def run(connection_type, use_vision=False, swarm_uris=None):
 
           try:
             cv2.imshow(WIN_NAME, display)
+            time.sleep(0.001)
+
             if (cv2.waitKey(1) & 0xFF) == 27:  # ESC to close vision
               stop_vision.set()
               break

@@ -95,6 +95,9 @@ class DetectorRT:
 
     # internal lock so any thread that calls read() does so one-at-a-time.
     self._cap_lock = threading.Lock()
+    
+    self._latest_frame = None
+    self._latest_lock = threading.Lock()
 
   def _point_to_cell(self, x: float, y: float, w: int, h: int):
     """
@@ -193,6 +196,15 @@ class DetectorRT:
     got_fps = float(self.cap.get(cv2.CAP_PROP_FPS))
     logger.info(f"Camera opened at {got_w}x{got_h} @ {got_fps:.1f} FPS (MJPG)")
 
+  def latest(self):
+    """
+    Return (frame, results) of the most recent processed frame without 
+    reading the camera.
+    """
+    with self._latest_lock:
+      frame = None if self._latest_frame is None else self._latest_frame.copy()
+    return frame, self.last_results
+
   def release(self):
     """
     Release camera and detroy and open windows.
@@ -290,6 +302,10 @@ class DetectorRT:
 
     self._overlay_grid(frame)
     self._mark_occupied(frame) # Highlight the occupied cells and then draw grid
+    self.last_results = results
+
+    with self._latest_lock:
+      self._latest_frame = frame.copy()   # small cost; safe for readers
     self.last_results = results
 
     return frame, results
