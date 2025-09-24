@@ -6,6 +6,7 @@ from typing import Optional, Tuple, Dict, Any, List
 import cv2
 import numpy as np
 import os
+import threading
 
 from utils import logger, context
 
@@ -91,6 +92,9 @@ class DetectorRT:
     self.occupied_color: Tuple[int, int, int] = (40, 40, 200) # BGR (red-ish(?))
     self.occupied_alpha: float = 0.75                         # 0..1 fill opacity
     self._occupied_cells = set()                              # A set of {(row, col), ...}
+
+    # internal lock so any thread that calls read() does so one-at-a-time.
+    self._cap_lock = threading.Lock()
 
   def _point_to_cell(self, x: float, y: float, w: int, h: int):
     """
@@ -195,9 +199,10 @@ class DetectorRT:
     """
     if self.cap is not None:
       # Put camera back to AUTO so the next run doesn’t start “dark”
-      self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 3)  # AUTO
-      self.cap.set(cv2.CAP_PROP_AUTO_WB, 1)
-      self.cap.release()
+      with self._cap_lock:
+        self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 3)  # AUTO
+        self.cap.set(cv2.CAP_PROP_AUTO_WB, 1)
+        self.cap.release()
       self.cap = None
     cv2.destroyAllWindows()
 
@@ -218,7 +223,8 @@ class DetectorRT:
       logger.error("Call open() before read().")
       raise RuntimeError("Call open() before read().")
 
-    ok, frame = self.cap.read()
+    with self._cap_lock:
+      ok, frame = self.cap.read()
     if not ok or frame is None:
       return None, {}
 
