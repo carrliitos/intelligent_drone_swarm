@@ -63,6 +63,9 @@ def run(connection_type, use_vision=False, swarm_uris=None):
         camera=0,
         calib_path=calibration_path,
         marker_length_m=0.025,
+        width=1920, 
+        height=1080, 
+        fps=30,
         draw_axes=False,
         # Draw grid
         draw_grid=False,
@@ -72,27 +75,47 @@ def run(connection_type, use_vision=False, swarm_uris=None):
       )
       detector.open()
 
+      WIN_NAME = "Intelligent Drone Swarm (ArUco)"
+      cv2.namedWindow(WIN_NAME, cv2.WINDOW_NORMAL)
+      cv2.resizeWindow(WIN_NAME, 960, 540)  # initial preview size
+
       def _vision_loop():
+        # Max preview box; capture stays full-res
+        max_w, max_h = 960, 540
+
         # Loop to display annotated frames
         while not stop_vision.is_set():
           frame, results = detector.read()
           if frame is None:
             continue
+
+          # display-only resize: keep aspect ratio
+          h, w = frame.shape[:2]
+          scale = min(max_w / w, max_h / h, 1.0)
+          display = frame if scale >= 1.0 else cv2.resize(frame, (int(w*scale), int(h*scale)))
+
           # Log detections
           ids = results.get("ids")
           if ids is not None:
             try:
               flat_ids = [int(x[0]) for x in ids]
+              logger.debug(f"Aruco IDs: {flat_ids}")
             except Exception:
               pass
 
           try:
-            cv2.imshow("Intelligent Drone Swarm (ArUco)", frame)
+            cv2.imshow(WIN_NAME, display)
             if (cv2.waitKey(1) & 0xFF) == 27:  # ESC to close vision
               stop_vision.set()
               break
           except Exception:
             pass
+
+        # Cleanup this window when the loop stops
+        try:
+          cv2.destroyWindow(WIN_NAME)
+        except Exception:
+          pass
 
       vision_thread = threading.Thread(target=_vision_loop, daemon=True)
       vision_thread.start()
