@@ -159,22 +159,44 @@ class DetectorRT:
       logger.error("Could not open camera.")
       raise RuntimeError("Camera open failed.")
 
-    # idk if this actuall does anything -- i just saw this on some tutorial
+    ### IMPORTANT: Specific to C920 at 720p/1080p ###
+    self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+
+    # Request resolution/FPS
     self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
     self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
     self.cap.set(cv2.CAP_PROP_FPS, self.fps)
 
     self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1) # Reduce Latency
+    self.cap.set(cv2.CAP_PROP_CONVERT_RGB, 1) # Ensure RGB conversion
 
-    # Keep exposure short enough for 30 fps; disable auto if needed
-    self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1)
-    self.cap.set(cv2.CAP_PROP_EXPOSURE, -6)
+    # Hard toggle exposure to known-good AUTO state
+    # V4L2 expects '3' for auto. Some OpenCV builds also accept 0.75
+    self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1) # manual (kick)
+    self.cap.set(cv2.CAP_PROP_EXPOSURE, -4) # safe-ish dummy (ignored in AUTO)
+    self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 3) # AUTO (V4L2)
+    self.cap.set(cv2.CAP_PROP_AUTO_WB, 1)
+
+    # Warm-up: grab a few frames so auto-exposure converges
+    for _ in range(10):
+      ok, _ = self.cap.read()
+      if not ok:
+        break
+
+    # Sanity checks
+    got_w = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    got_h = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    got_fps = float(self.cap.get(cv2.CAP_PROP_FPS))
+    logger.info(f"Camera opened at {got_w}x{got_h} @ {got_fps:.1f} FPS (MJPG)")
 
   def release(self):
     """
     Release camera and detroy and open windows.
     """
     if self.cap is not None:
+      # Put camera back to AUTO so the next run doesn’t start “dark”
+      self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 3)  # AUTO
+      self.cap.set(cv2.CAP_PROP_AUTO_WB, 1)
       self.cap.release()
       self.cap = None
     cv2.destroyAllWindows()
