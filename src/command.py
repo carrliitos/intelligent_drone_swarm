@@ -384,6 +384,8 @@ class Command:
       # gate: only do someting while G/S flight modes are active
       if (start_event is None or not start_event.is_set()) or not (self.manual_active or self.swarm_active):
         # stay idle; do not hover or land here
+        logger.debug(f"IBVS idle: event={start_event.is_set() if start_event else None}, "
+                     f"manual={self.manual_active}, swarm={self.swarm_active}")
         time.sleep(dt)
         continue
 
@@ -395,10 +397,13 @@ class Command:
       tgt = vision.primary_target(res, frame.shape)
       if not tgt:
         # no target? then do nothing (PyGame continues to command)
+        logger.debug("IBVS: no target detected this frame")
         time.sleep(dt)
         continue
 
       cx, cy, area, W, H = tgt
+      logger.debug(f"IBVS target: cx={cx:.1f}, cy={cy:.1f}, area={area:.0f}")
+
       if halfW is None: halfW, halfH = W / 2.0, H / 2.0
 
       # normalized errors
