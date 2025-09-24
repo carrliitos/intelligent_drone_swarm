@@ -15,6 +15,7 @@ from utils import logger, context
 from drone_connection import DroneConnection
 from drone_log import DroneLogs
 from swarm_command import SwarmCommand
+import vision
 
 directory = context.get_context(os.path.abspath(__file__))
 logger_file_name = Path(directory).stem
@@ -257,6 +258,7 @@ class Command:
           except Exception:
             pass
           self.manual_active = True
+          self.ibvs_enable_event.set()
 
         self._g_was_down = g_down
 
