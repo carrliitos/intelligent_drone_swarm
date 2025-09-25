@@ -89,6 +89,7 @@ class DroneLogs:
         "stateEstimate_x", "stateEstimate_y", "stateEstimate_z",
         "stateEstimate_vx", "stateEstimate_vy", "stateEstimate_vz",
         "range_zrange", # fast/clean altitude reference
+        "stateEstimate_roll", "stateEstimate_pitch", "stateEstimate_yaw",
         "kalman_varPX", "kalman_varPY", "kalman_varPZ",
         "gyro_x", "gyro_y", "gyro_z",
         "pm_vbatMV", "pm_batteryLevel",
@@ -110,7 +111,8 @@ class DroneLogs:
               self.stateEstimate_x, self.stateEstimate_y, self.stateEstimate_z,
               self.stateEstimate_vx, self.stateEstimate_vy, self.stateEstimate_vz,
               self.range_zrange,
-              self.kalman_varPX, self.kalman_varPY, self.kalman_varPXZ,
+              self.stateEstimate_roll, self.stateEstimate_pitch, self.stateEstimate_yaw,
+              self.kalman_varPX, self.kalman_varPY, self.kalman_varPZ,
               self.gyro_x, self.gyro_y, self.gyro_z,
               self.pm_vbatMV, self.pm_batteryLevel,
               self.motor_m1, self.motor_m2, self.motor_m3, self.motor_m4,
@@ -200,6 +202,10 @@ class DroneLogs:
       self.stateEstimate_log_config.add_variable("stateEstimate.vx", "float")
       self.stateEstimate_log_config.add_variable("stateEstimate.vy", "float")
       self.stateEstimate_log_config.add_variable("stateEstimate.vz", "float")
+
+      self.stateEstimate_log_config.add_variable("stateEstimate.roll", "float")
+      self.stateEstimate_log_config.add_variable("stateEstimate.pitch", "float")
+      self.stateEstimate_log_config.add_variable("stateEstimate.yaw", "float")
 
       self.stateEstimate_log_config.add_variable("range.zrange", "float")
 
@@ -424,6 +430,10 @@ class DroneLogs:
       self.stateEstimate_vy = data["stateEstimate.vy"]
       self.stateEstimate_vz = data["stateEstimate.vz"]
 
+      self.stateEstimate_roll = data["stateEstimate.roll"]
+      self.stateEstimate_pitch = data["stateEstimate.pitch"]
+      self.stateEstimate_yaw = data["stateEstimate.yaw"]
+
       self.range_zrange = data["range.zrange"]
 
       self.range_zrange = data["kalman.varPX"]
@@ -537,6 +547,18 @@ class DroneLogs:
   def get_stateEstimate_vz(self):
     with self.lock:
       return self.stateEstimate_vz
+
+  def get_stateEstimate_roll(self):
+    with self.lock:
+      return self.stateEstimate_roll
+
+  def get_stateEstimate_pitch(self):
+    with self.lock:
+      return self.stateEstimate_pitch
+
+  def get_stateEstimate_yaw(self):
+    with self.lock:
+      return self.stateEstimate_yaw
 
   def get_range_zrange(self):
     with self.lock:
