@@ -1,3 +1,4 @@
+import math
 import time
 import os
 import pandas as pd
@@ -58,6 +59,21 @@ class Command:
 
     self.ibvs_enable_event = threading.Event()   # pressed KP1 -> set; pressed again -> clear
     self.ibvs_enabled = False
+
+    # targets for telemetry-based controller
+    self.x_ref = None
+    self.y_ref = None
+    self.z_ref = None
+    self.yaw_ref_deg = None
+
+  @staticmethod
+  def _sat(x, lo, hi):
+    return max(lo, min(hi, x))
+
+  @staticmethod
+  def _wrap_pi(a):
+    # wrap to [-pi, pi)
+    return (a + math.pi) % (2.0 * math.pi) - math.pi
 
   def _wait_for_param_download(self):
     logger.info("Waiting for parameters to be downloaded.")
@@ -161,6 +177,16 @@ class Command:
           pass
         self.manual_active = True
         self.ibvs_enable_event.set()
+        
+        # Initialize telemetry targets at current pose
+        try:
+          self.x_ref = self.drone_logger.get_stateEstimate_x()
+          self.y_ref = self.drone_logger.get_stateEstimate_y()
+          self.z_ref = max(0.15, float(self.drone_logger.get_range_zrange() or self.takeoff_alt))
+          self.yaw_ref_deg = float(self.drone.get_stateEstimate_yaw())
+        except Exception:
+          pass
+
       self._g_was_down = g_down
       # Not in manual yet, nothing else to do this frame
       return
@@ -284,6 +310,16 @@ class Command:
 
           self.swarm_active = True
           self.ibvs_enable_event.set()
+
+          # initialize targets from current primary link telemetry if available
+          try:
+            self.x_ref = self.drone_logger.get_stateEstimate_x()
+            self.y_ref = self.drone_logger.get_stateEstimate_y()
+            self.z_ref = max(0.15, float(self.drone_logger.get_range_zrange() or self.takeoff_alt))
+            self.yaw_ref_deg = float(self.drone.get_stateEstimate_yaw())
+          except Exception:
+            pass
+
         self._s_was_down = s_down
 
         # LAND/EXIT: single(L) vs swarm(K)
@@ -294,6 +330,7 @@ class Command:
             self.mc = None
             self.manual_active = False
             self.ibvs_enable_event.clear()
+            self.x_ref = self.y_ref = self.z_ref = self.yaw_ref_deg = None
 
         if self.swarm_active and keys[pygame.K_k]:
           try:
@@ -301,6 +338,8 @@ class Command:
           finally:
             self.swarm_active = False
             self.ibvs_enable_event.clear()
+            self.x_ref = self.y_ref = self.z_ref = self.yaw_ref_deg = None
+
             # Reconnect primary link so single-drone controls work again
             try:
               if hasattr(self.drone, "_cf") and hasattr(self.drone, "link_uri"):
@@ -431,6 +470,134 @@ class Command:
 
       # send setpoint (vy=0 for simplicity)
       self.mc.start_linear_motion(vx, 0.0, vz, rate_yaw=yaw_rate)
+
+      # pacing
+      elapsed = time.time() - t0
+      if elapsed < dt:
+        time.sleep(dt - elapsed)
+
+  def follow_target_servo(self, detector, stop_event, start_event=None, 
+                          loop_hz=50, gains=None, vision_yaw_alpha=0.05, 
+                          forward_nudge_alpha=0.03):
+    """
+    Telemetry-primary position/velocity servo with optional slow vision drift correction.
+    Uses stateEstimate/ToF for control; vision only nudges references when confident.
+    """
+    if self.mc is None:
+      self.mc = MotionCommander(self.scf)
+
+
+    # default gains
+    if gains is None:
+      gains = dict(Kpx=0.6, Kdx=0.2,
+                   Kpy=0.6, Kdy=0.2,
+                   Kpz=1.0, Kiz=0.2,
+                   Kpyaw=2.0, Kdyaw=0.3)
+
+    Kpx, Kdx = gains["Kpx"], gains["Kdx"]
+    Kpy, Kdy = gains["Kpy"], gains["Kdy"]
+    Kpz, Kiz = gains["Kpz"], gains["Kiz"]
+    Kpyaw, Kdyaw = gains["Kpyaw"], gains["Kdyaw"]
+
+    iz = 0.0
+    dt = 1.0 / float(loop_hz)
+    max_vxy, max_vz, max_rate = 0.30, 0.25, 180.0  # m/s, m/s, deg/s
+    last_t = time.time()
+
+    while not stop_event.is_set():
+      t0 = time.time()
+
+      # only run while the manual/swarm flight mode is active
+      if (start_event is None or not start_event.is_set()) or not (self.manual_active or self.swarm_active):
+        time.sleep(dt)
+        continue
+
+      # gate on estimator health
+      try:
+        ok_est = (self.drone_logger.get_kalman_varPX() < 1.0 and
+                  self.drone_logger.get_kalman_varPY() < 1.0 and 
+                  self.drone_logger.get_kalman_varPZ() < 1.0)
+      except Exception:
+        ok_est = True
+
+      if not ok_est:
+        self.mc.stop()
+        time.sleep(dt)
+        continue
+
+      # read telemetry snapshot
+      try:
+        x = float(self.drone_logger.get_stateEstimate_x())
+        y = float(self.drone_logger.get_stateEstimate_y())
+        zt = float(self.drone_logger.get_range_zrange() or self.drone_logger.get_stateEstimate_z())
+        vx = float(self.drone_logger.get_stateEstimate_vx())
+        vy = float(self.drone_logger.get_stateEstimate_vy())
+        yaw_deg = float(self.drone_logger.get_stateEstimate_yaw())
+        yawrate_dps = float(self.drone_logger.get_gyro_z())
+      except Exception:
+        time.sleep(dt)
+        continue
+
+      # initialize refs if missing
+      if self.x_ref is None:
+        self.x_ref = x 
+        self.y_ref = y
+        self.z_ref = max(0.15, zt)
+        self.yaw_ref_deg = yaw_deg
+
+      # slow vision drift correction (yaw & gentle forward pull) -- might delete later (shoutout JCole)
+      try:
+        frame, res = detector.latest() if detector else (None, {})
+        tgt = vision.primary_target(res, frame.shape) if (frame is not None and res) else None
+
+        if tgt:
+          cx, cy, area, W, H = tgt
+          ex_px = (cx - (W / 2.0)) / max(1.0, (W / 2.0)) # normalize the horizontal offset to [-1, 1]
+          # nudge yaw reference a little toward the tag
+          self.yaw_ref_deg += float(vision_yaw_alpha * ex_px * 30.0) # up to +/- 30 degrees scaled by ex
+
+          # forward nudge: pull towards the tag by shrinking (x_ref, y_ref) along heading
+          # heuristic using area as inverse-distance proxy
+          if area > 1.0 and forward_nudge_alpha > 0.0:
+            # move a few cm towards the heading
+            d_step = forward_nudge_alpha * 0.05 # meters per tick
+            yaw_rad = math.radians(yaw_deg)
+            self.x_ref += d_step * math.cos(yaw_rad)
+            self.y_ref += d_step * math.sin(yaw_rad)
+      except Exception:
+        pass
+
+      # errors in local frame
+      ex = self.x_ref - x
+      ey = self.y_ref - y
+      ez = self.z_ref - zt
+      eyaw = self._wrap_pi(math.radians(self.yaw_ref_deg) - math.radians(yaw_deg)) # rad
+
+      # PD/PI in world frame for x,y
+      # PI for z using ToF
+      # Still kinda buggy due to drop in FPS
+      vx_g = (Kpx * ex) - (Kdx * vx)
+      vy_g = (Kpy * ey) - (Kdy * vy)
+      iz = self._sat(iz + (Kiz * ez * dt), -0.3, 0.3)
+      vz = self._sat(Kpz * ez + iz, -max_vz, max_vz)
+
+      # rotate to body frame for MotionCommander
+      # reference: https://github.com/alireza787b/mavsdk_drone_show/blob/73a0587bbdeff18b647db582c0a89042247014fc/smart_swarm_src/utils.py#L10
+      yaw = math.radians(yaw_deg)
+      cy, sy = math.cos(yaw), math.sin(yaw)
+      vx_b = cy * vx_g + sy * vy_g
+      vy_b = -sy * vx_g + cy * vy_g
+
+      # Yaw rate command (deg/s). 
+      # yawrate_dps already in deg/s if using gyro_z scaled; else keep small D.
+      rate_yaw = self._sat(math.degrees(Kpyaw * eyaw) - (Kdyaw * yawrate_dps), -max_rate, max_rate)
+
+      # clamp the planar speeds
+      vx_b = self._sat(vx_b, -max_vxy, max_vxy)
+      vy_b = self._sat(vy_b, -max_vxy, max_vxy)
+
+      # send it
+      self.mc.start_linear_motion(vx_b, vy_b, vz, rate_yaw=rate_yaw)
 
       # pacing
       elapsed = time.time() - t0
