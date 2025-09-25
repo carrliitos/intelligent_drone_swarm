@@ -5,6 +5,8 @@ import pandas as pd
 import sys
 import pygame
 import threading
+import numpy as np
+import importlib
 from pathlib import Path
 from collections import deque
 
@@ -357,6 +359,18 @@ class Command:
           self._go(keys)
 
         screen.fill((0, 0, 0))
+
+        try:
+          main_mod = sys.modules.get('main') or importlib.import_module('main')
+          with main_mod._latest_frame_lock:
+            frame_rgb = main_mod._latest_frame_np
+            if frame_rgb is not None:
+              h, w = frame_rgb.shape[:2]
+              surf = pygame.image.frombuffer(frame_rgb.tobytes(), (w, h), "RGB")
+              logger.debug(f"pg frame mean={float(frame_rgb.mean()):.1f}, shape={frame_rgb.shape}")
+              screen.blit(surf, (0, 0))
+        except Exception as e:
+          logger.debug(f"preview blit skipped: {e}")
 
         instructions = [
           "Drone Control",

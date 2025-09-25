@@ -1,6 +1,8 @@
 import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
+import numpy as np
+import pygame
 import os
 import sys
 import time
@@ -32,6 +34,9 @@ RADIO_CHANNELS = {
   "8": "radio://0/80/2M/E7E7E7E7E8",
   "9": "radio://0/80/2M/E7E7E7E7E9"
 }
+
+_latest_frame_lock = threading.Lock()
+_latest_frame_np = None
 
 def run(connection_type, use_vision=False, swarm_uris=None):
   cflib.crtp.init_drivers(enable_debug_driver=False)
@@ -76,21 +81,11 @@ def run(connection_type, use_vision=False, swarm_uris=None):
       )
       detector.open()
 
-      WIN_NAME = "Intelligent Drone Swarm (ArUco)"
-      cv2.namedWindow(WIN_NAME, cv2.WINDOW_NORMAL)
-      cv2.resizeWindow(WIN_NAME, 960, 540)  # initial preview size
-
       def _vision_loop():
-        # Max preview box; capture stays full-res
         max_w, max_h = 960, 540
         last_ok = time.time()
-        # Loop to display annotated frames
         while not stop_vision.is_set():
-          frame, results = detector.read()
-
-          if frame is not None:
-            logger.debug(f"preview mean={frame.mean():.1f}, shape={frame.shape}")
-
+          frame, _ = detector.read()
           if frame is None:
             if time.time() - last_ok > 1.0:
               logger.warning("No camera frames for >1s; check USB bandwidth, device index, or conflicts.")
@@ -98,35 +93,17 @@ def run(connection_type, use_vision=False, swarm_uris=None):
             continue
           last_ok = time.time()
 
-          # display-only resize: keep aspect ratio
+          # preview resize to keep it light
           h, w = frame.shape[:2]
           scale = min(max_w / w, max_h / h, 1.0)
-          display = frame if scale >= 1.0 else cv2.resize(frame, (int(w*scale), int(h*scale)))
+          if scale < 1.0:
+            frame = cv2.resize(frame, (int(w*scale), int(h*scale)))
 
-          # Log detections
-          ids = results.get("ids")
-          if ids is not None:
-            try:
-              flat_ids = [int(x[0]) for x in ids]
-              logger.debug(f"Aruco IDs: {flat_ids}")
-            except Exception:
-              pass
-
-          try:
-            cv2.imshow(WIN_NAME, display)
-            time.sleep(0.001)
-
-            if (cv2.waitKey(1) & 0xFF) == 27:  # ESC to close vision
-              stop_vision.set()
-              break
-          except Exception:
-            pass
-
-        # Cleanup this window when the loop stops
-        try:
-          cv2.destroyWindow(WIN_NAME)
-        except Exception:
-          pass
+          # Store latest frame (BGR -> RGB) for pygame
+          global _latest_frame_np
+          rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+          with _latest_frame_lock:
+            _latest_frame_np = np.ascontiguousarray(rgb)
 
       vision_thread = threading.Thread(target=_vision_loop, daemon=True)
       vision_thread.start()
