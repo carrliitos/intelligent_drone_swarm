@@ -12,6 +12,7 @@ from utils import logger
 from utils import context
 from drone_connection import DroneConnection
 from command import Command
+from command import SwarmCommand
 from drone_log import DroneLogs
 from vision import DetectorRT
 
@@ -60,7 +61,7 @@ def run(connection_type, use_vision=False, swarm_uris=None):
       logger.info("==========Connecting to OpenCV==========")
       detector = DetectorRT(
         dictionary="4x4_1000",
-        camera=0,
+        camera=2,
         calib_path=calibration_path,
         marker_length_m=0.025,
         width=1920, 
@@ -82,12 +83,16 @@ def run(connection_type, use_vision=False, swarm_uris=None):
       def _vision_loop():
         # Max preview box; capture stays full-res
         max_w, max_h = 960, 540
-
+        last_ok = time.time()
         # Loop to display annotated frames
         while not stop_vision.is_set():
           frame, results = detector.read()
           if frame is None:
+            if time.time() - last_ok > 1.0:
+              logger.warning("No camera frames for >1s; check USB bandwidth, device index, or conflicts.")
+            time.sleep(0.01)
             continue
+          last_ok = time.time()
 
           # display-only resize: keep aspect ratio
           h, w = frame.shape[:2]
@@ -137,7 +142,7 @@ def run(connection_type, use_vision=False, swarm_uris=None):
             vision_yaw_alpha=0.05,
             forward_nudge_alpha=0.03
           )
-        except Exception:
+        except Exception as e:
           logger.error(f"Servo error: {e}")
       ctrl_thread = threading.Thread(target=_ctrl_loop, daemon=True)
       ctrl_thread.start()
