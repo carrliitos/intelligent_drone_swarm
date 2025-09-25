@@ -17,7 +17,7 @@ logger = logger.setup_logger(logger_name, f"{directory}/logs/{logger_file_name}.
 
 class DetectorRT:
   """
-  Real-time ArUco detection and pose estimation (**CURRENTLY OPTIONAL**).
+  Real-time ArUco detection and pose estimation.
   """
 
   _DICT_NAME_TO_ENUM = {
@@ -59,7 +59,7 @@ class DetectorRT:
     self.window_title = window_title
     self.draw_axes = draw_axes
 
-    # Pose estimation stuff (**CURRENTLY OPTIONAL: Still needs calibration file.**)
+    # Pose estimation stuff
     self.marker_length_m = marker_length_m
     self.camera_matrix = None
     self.dist_coeffs = None
