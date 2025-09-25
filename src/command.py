@@ -252,7 +252,7 @@ class Command:
 
     logger.info("In pygame function")
     pygame.init()
-    screen = pygame.display.set_mode((600, 600))
+    screen = pygame.display.set_mode((600, 600), pygame.RESIZABLE)
     pygame.display.set_caption("Drone Flight Controls")
     font = pygame.font.SysFont("monospace", 16)
 
@@ -360,17 +360,37 @@ class Command:
 
         screen.fill((0, 0, 0))
 
+        SCREEN_W, SCREEN_H = screen.get_size()
+        INFO_H = max(140, SCREEN_H // 4) # bottom info strip height
+        VIDEO_W = SCREEN_W
+        VIDEO_H = SCREEN_H - INFO_H # top area reserved for video
+
+        frame_rgb = None
         try:
           main_mod = sys.modules.get('main') or importlib.import_module('main')
           with main_mod._latest_frame_lock:
-            frame_rgb = main_mod._latest_frame_np
-            if frame_rgb is not None:
-              h, w = frame_rgb.shape[:2]
-              surf = pygame.image.frombuffer(frame_rgb.tobytes(), (w, h), "RGB")
-              logger.debug(f"pg frame mean={float(frame_rgb.mean()):.1f}, shape={frame_rgb.shape}")
-              screen.blit(surf, (0, 0))
+            if main_mod._latest_frame_np is not None:
+              frame_rgb = main_mod._latest_frame_np.copy()
         except Exception as e:
-          logger.debug(f"preview blit skipped: {e}")
+          logger.debug(f"preview copy failed: {e}")
+
+        if frame_rgb is not None:
+          fh, fw = frame_rgb.shape[:2]
+          scale = min(VIDEO_W / fw, VIDEO_H / fh)
+          tw, th = int(fw * scale), int(fh * scale)
+
+          surf = pygame.image.frombuffer(frame_rgb.tobytes(), (fw, fh), "RGB")
+          if (tw, th) != (fw, fh):
+            surf = pygame.transform.smoothscale(surf, (tw, th))
+
+          x0 = (VIDEO_W - tw) // 2
+          y0 = (VIDEO_H - th) // 2
+          screen.blit(surf, (x0, y0))
+
+        info_y = SCREEN_H - INFO_H
+        panel = pygame.Surface((SCREEN_W, INFO_H), pygame.SRCALPHA)
+        panel.fill((18, 18, 22, 220))   # RGBA with alpha
+        screen.blit(panel, (0, info_y))
 
         instructions = [
           "Drone Control",
@@ -386,12 +406,19 @@ class Command:
           "Backspace   | Exit program"
         ]
 
-        for i, line in enumerate(instructions):
-          text = font.render(line, True, (255, 255, 255))
-          screen.blit(text, (20, 20 + i * 25))
+        pad_x, pad_y = 16, 12
+        x, y = pad_x, info_y + pad_y
+        clock = pygame.time.Clock()
+
+        for line in instructions:
+          txt = font.render(line, True, (230, 230, 230))
+          screen.blit(txt, (x, y))
+          y += txt.get_height() + 6
+          if y > SCREEN_H - 8:  # prevent overflow
+            break
 
         pygame.display.flip()
-        time.sleep(0.01)
+        clock.tick(60)
 
     finally:
       logger.info("Stopping logging and closing connection to drone.")
