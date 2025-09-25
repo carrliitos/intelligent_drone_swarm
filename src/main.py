@@ -1,6 +1,8 @@
 import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
+import numpy as np
+import pygame
 import os
 import sys
 import time
@@ -12,6 +14,7 @@ from utils import logger
 from utils import context
 from drone_connection import DroneConnection
 from command import Command
+from command import SwarmCommand
 from drone_log import DroneLogs
 from vision import DetectorRT
 
@@ -23,12 +26,17 @@ logger_name = Path(__file__).stem
 logger_file = f"{directory}/logs/{logger_file_name}.log"
 logger = logger.setup_logger(logger_name, logger_file)
 
+calibration_path = f"{directory}/src/utils/calibration_imgs/cam_param.npz"
+
 UDP = "udp://192.168.43.51:2390"
 RADIO_CHANNELS = {
   "7": "radio://0/80/2M/E7E7E7E7E7",
   "8": "radio://0/80/2M/E7E7E7E7E8",
   "9": "radio://0/80/2M/E7E7E7E7E9"
 }
+
+_latest_frame_lock = threading.Lock()
+_latest_frame_np = None
 
 def run(connection_type, use_vision=False, swarm_uris=None):
   cflib.crtp.init_drivers(enable_debug_driver=False)
@@ -43,7 +51,8 @@ def run(connection_type, use_vision=False, swarm_uris=None):
   swarm_cmd = SwarmCommand(swarm_uris) if swarm_uris else None
   command = Command(drone=drone, 
                     drone_logger=drone_logger, 
-                    swarm=swarm_cmd)
+                    swarm=swarm_cmd,
+                    takeoff_alt=0.25)
   detector = None
   vision_thread = None
   stop_vision = threading.Event()
@@ -58,11 +67,14 @@ def run(connection_type, use_vision=False, swarm_uris=None):
       detector = DetectorRT(
         dictionary="4x4_1000",
         camera=2,
-        calib_path=None,
-        marker_length_m=None,
-        draw_axes=True,
+        calib_path=calibration_path,
+        marker_length_m=0.025,
+        width=1920, 
+        height=1080, 
+        fps=30,
+        draw_axes=False,
         # Draw grid
-        draw_grid=True,
+        draw_grid=False,
         grid_step_px=40,
         draw_rule_of_thirds=False,
         draw_crosshair=False
@@ -70,29 +82,52 @@ def run(connection_type, use_vision=False, swarm_uris=None):
       detector.open()
 
       def _vision_loop():
-        # Loop to display annotated frames
+        max_w, max_h = 960, 540
+        last_ok = time.time()
         while not stop_vision.is_set():
-          frame, results = detector.read()
+          frame, _ = detector.read()
           if frame is None:
+            if time.time() - last_ok > 1.0:
+              logger.warning("No camera frames for >1s; check USB bandwidth, device index, or conflicts.")
+            time.sleep(0.01)
             continue
-          # Log detections
-          ids = results.get("ids")
-          if ids is not None:
-            try:
-              flat_ids = [int(x[0]) for x in ids]
-            except Exception:
-              pass
+          last_ok = time.time()
 
-          try:
-            cv2.imshow("Intelligent Drone Swarm (ArUco)", frame)
-            if (cv2.waitKey(1) & 0xFF) == 27:  # ESC to close vision
-              stop_vision.set()
-              break
-          except Exception:
-            pass
+          # preview resize to keep it light
+          h, w = frame.shape[:2]
+          scale = min(max_w / w, max_h / h, 1.0)
+          if scale < 1.0:
+            frame = cv2.resize(frame, (int(w*scale), int(h*scale)))
+
+          # Store latest frame (BGR -> RGB) for pygame
+          global _latest_frame_np
+          rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+          with _latest_frame_lock:
+            _latest_frame_np = np.ascontiguousarray(rgb)
 
       vision_thread = threading.Thread(target=_vision_loop, daemon=True)
       vision_thread.start()
+
+      ctrl_stop = threading.Event()
+      def _ctrl_loop():
+        try:
+          command.follow_target_servo(
+            detector=detector,
+            stop_event=ctrl_stop,
+            start_event=command.ibvs_enable_event,
+            loop_hz=50,
+            gains=dict(Kpx=0.6, Kdx=0.2,
+                       Kpy=0.6, Kdy=0.2,
+                       Kpz=1.0, Kiz=0.2,
+                       Kpyaw=2.0, Kdyaw=0.3),
+            vision_yaw_alpha=0.05,
+            forward_nudge_alpha=0.03
+          )
+        except Exception as e:
+          logger.error(f"Servo error: {e}")
+      ctrl_thread = threading.Thread(target=_ctrl_loop, daemon=True)
+      ctrl_thread.start()
+
     time.sleep(5.0)
 
     logger.info("==========Connecting to PyGame==========")
@@ -109,6 +144,10 @@ def run(connection_type, use_vision=False, swarm_uris=None):
       if vision_thread:
         vision_thread.join(timeout=2.0)
       try:
+        ctrl_stop.set()
+        if 'ctrl_thread' in locals():
+          ctrl_thread.join(timeout=2.0)
+
         detector.release()
       except Exception:
         pass

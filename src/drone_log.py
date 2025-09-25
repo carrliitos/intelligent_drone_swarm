@@ -63,6 +63,16 @@ class DroneLogs:
     self.stateEstimate_x = 0.0
     self.stateEstimate_y = 0.0
     self.stateEstimate_z = 0.0
+    self.stateEstimate_roll = 0.0
+    self.stateEstimate_pitch = 0.0
+    self.stateEstimate_yaw = 0.0
+    self.stateEstimate_vx = 0.0
+    self.stateEstimate_vy = 0.0
+    self.stateEstimate_vz = 0.0
+    self.range_zrange = 0.0
+    self.kalman_varPX = 0.0
+    self.kalman_varPY = 0.0
+    self.kalman_varPZ = 0.0
 
     self._write_logs()
 
@@ -77,6 +87,10 @@ class DroneLogs:
         "timestamp",
         "thrust", "roll", "pitch", "yaw",
         "stateEstimate_x", "stateEstimate_y", "stateEstimate_z",
+        "stateEstimate_vx", "stateEstimate_vy", "stateEstimate_vz",
+        "range_zrange", # fast/clean altitude reference
+        "stateEstimate_roll", "stateEstimate_pitch", "stateEstimate_yaw",
+        "kalman_varPX", "kalman_varPY", "kalman_varPZ",
         "gyro_x", "gyro_y", "gyro_z",
         "pm_vbatMV", "pm_batteryLevel",
         "motor_m1", "motor_m2", "motor_m3", "motor_m4",
@@ -95,6 +109,10 @@ class DroneLogs:
               time.time(),
               self.thrust, self.roll, self.pitch, self.yaw,
               self.stateEstimate_x, self.stateEstimate_y, self.stateEstimate_z,
+              self.stateEstimate_vx, self.stateEstimate_vy, self.stateEstimate_vz,
+              self.range_zrange,
+              self.stateEstimate_roll, self.stateEstimate_pitch, self.stateEstimate_yaw,
+              self.kalman_varPX, self.kalman_varPY, self.kalman_varPZ,
               self.gyro_x, self.gyro_y, self.gyro_z,
               self.pm_vbatMV, self.pm_batteryLevel,
               self.motor_m1, self.motor_m2, self.motor_m3, self.motor_m4,
@@ -172,7 +190,7 @@ class DroneLogs:
 
   def _stateEstimate(self):
     """
-    Log PID Roll Rates.
+    Log state estimates.
     """
     self.stateEstimate_log_config = LogConfig(name="stateEstimate", period_in_ms=500)
 
@@ -180,6 +198,20 @@ class DroneLogs:
       self.stateEstimate_log_config.add_variable("stateEstimate.x", "float")
       self.stateEstimate_log_config.add_variable("stateEstimate.y", "float")
       self.stateEstimate_log_config.add_variable("stateEstimate.z", "float")
+
+      self.stateEstimate_log_config.add_variable("stateEstimate.vx", "float")
+      self.stateEstimate_log_config.add_variable("stateEstimate.vy", "float")
+      self.stateEstimate_log_config.add_variable("stateEstimate.vz", "float")
+
+      self.stateEstimate_log_config.add_variable("stateEstimate.roll", "float")
+      self.stateEstimate_log_config.add_variable("stateEstimate.pitch", "float")
+      self.stateEstimate_log_config.add_variable("stateEstimate.yaw", "float")
+
+      self.stateEstimate_log_config.add_variable("range.zrange", "float")
+
+      self.stateEstimate_log_config.add_variable("kalman.varPX", "float")
+      self.stateEstimate_log_config.add_variable("kalman.varPY", "float")
+      self.stateEstimate_log_config.add_variable("kalman.varPZ", "float")
 
       self._cf.log.add_config(self.stateEstimate_log_config)
       self.stateEstimate_log_config.data_received_cb.add_callback(self._log_callback__stateEstimate)
@@ -391,8 +423,22 @@ class DroneLogs:
     """ Callback for PID rates data. """
     with self.lock:
       self.stateEstimate_x = data["stateEstimate.x"]
-      self.stateEstimate_x = data["stateEstimate.x"]
-      self.stateEstimate_x = data["stateEstimate.x"]
+      self.stateEstimate_y = data["stateEstimate.y"]
+      self.stateEstimate_z = data["stateEstimate.z"]
+
+      self.stateEstimate_vx = data["stateEstimate.vx"]
+      self.stateEstimate_vy = data["stateEstimate.vy"]
+      self.stateEstimate_vz = data["stateEstimate.vz"]
+
+      self.stateEstimate_roll = data["stateEstimate.roll"]
+      self.stateEstimate_pitch = data["stateEstimate.pitch"]
+      self.stateEstimate_yaw = data["stateEstimate.yaw"]
+
+      self.range_zrange = data["range.zrange"]
+
+      self.range_zrange = data["kalman.varPX"]
+      self.range_zrange = data["kalman.varPY"]
+      self.range_zrange = data["kalman.varPZ"]
 
   def _log_callback__pid_rate_roll(self, timestamp, data, logconf):
     """ Callback for PID rates data. """
@@ -489,3 +535,43 @@ class DroneLogs:
   def get_stateEstimate_z(self):
     with self.lock:
       return self.stateEstimate_z
+
+  def get_stateEstimate_vx(self):
+    with self.lock:
+      return self.stateEstimate_vx
+
+  def get_stateEstimate_vy(self):
+    with self.lock:
+      return self.stateEstimate_vy
+
+  def get_stateEstimate_vz(self):
+    with self.lock:
+      return self.stateEstimate_vz
+
+  def get_stateEstimate_roll(self):
+    with self.lock:
+      return self.stateEstimate_roll
+
+  def get_stateEstimate_pitch(self):
+    with self.lock:
+      return self.stateEstimate_pitch
+
+  def get_stateEstimate_yaw(self):
+    with self.lock:
+      return self.stateEstimate_yaw
+
+  def get_range_zrange(self):
+    with self.lock:
+      return self.range_zrange
+
+  def get_kalman_varPX(self):
+    with self.lock:
+      return self.kalman_varPX
+
+  def get_kalman_varPY(self):
+    with self.lock:
+      return self.kalman_varPY
+
+  def get_kalman_varPZ(self):
+    with self.lock:
+      return self.kalman_varPZ

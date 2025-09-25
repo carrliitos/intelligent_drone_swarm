@@ -6,6 +6,7 @@ from typing import Optional, Tuple, Dict, Any, List
 import cv2
 import numpy as np
 import os
+import threading
 
 from utils import logger, context
 
@@ -16,8 +17,11 @@ logger = logger.setup_logger(logger_name, f"{directory}/logs/{logger_file_name}.
 
 class DetectorRT:
   """
-  Real-time ArUco detection and pose estimation (**CURRENTLY OPTIONAL**).
+  Real-time ArUco detection and pose estimation.
   """
+
+  _singleton_open = threading.Lock()
+  _is_open = False
 
   _DICT_NAME_TO_ENUM = {
     "4x4_50":   cv2.aruco.DICT_4X4_50,
@@ -58,7 +62,7 @@ class DetectorRT:
     self.window_title = window_title
     self.draw_axes = draw_axes
 
-    # Pose estimation stuff (**CURRENTLY OPTIONAL: Still needs calibration file.**)
+    # Pose estimation stuff
     self.marker_length_m = marker_length_m
     self.camera_matrix = None
     self.dist_coeffs = None
@@ -85,6 +89,49 @@ class DetectorRT:
     self.grid_thickness = grid_thickness
     self.draw_rule_of_thirds = draw_rule_of_thirds
     self.draw_crosshair = draw_crosshair
+
+    # Occupy grid for the detected ArUco marker
+    self.highlight_occupied: bool = True
+    self.occupied_color: Tuple[int, int, int] = (40, 40, 200) # BGR (red-ish(?))
+    self.occupied_alpha: float = 0.75                         # 0..1 fill opacity
+    self._occupied_cells = set()                              # A set of {(row, col), ...}
+
+    # internal lock so any thread that calls read() does so one-at-a-time.
+    self._cap_lock = threading.Lock()
+    
+    self._latest_frame = None
+    self._latest_lock = threading.Lock()
+
+  def _point_to_cell(self, x: float, y: float, w: int, h: int):
+    """
+    Maps the pixel (x, y) to (row, col) in the grid.
+    """
+    step = max(1, self.grid_step_px)
+    col = int(np.clip(x, 0, w - 1)) // step
+    row = int(np.clip(y, 0, h - 1)) // step
+    return (row, col)
+
+  def _mark_occupied(self, frame: np.ndarray):
+    """
+    Alpha-fill currently occupied cell and then draw the grid lines on top of it.
+    """
+    if not (self.draw_grid and self.highlight_occupied and self._occupied_cells):
+      self._overlay_grid(frame) # default to just drawing the grid and overlays and stuff
+      return
+
+    h, w = frame.shape[:2]
+    step = max(1, self.grid_step_px)
+
+    # Draw fills on an overlay
+    overlay = frame.copy()
+    for (row, col) in self._occupied_cells:
+      x0, y0 = col * step, row * step
+      x1, y1 = min(x0 + step - 1, w - 1), min(y0 + step - 1, h - 1)
+      cv2.rectangle(overlay, (x0, y0), (x1, y1), self.occupied_color, thickness=cv2.FILLED)
+    # Blend overaly to frame
+    cv2.addWeighted(overlay, self.occupied_alpha, frame, 1.0 - self.occupied_alpha, 0, frame)
+
+    self._overlay_grid(frame)
 
   def _overlay_grid(self, frame: np.ndarray):
     h, w = frame.shape[:2]
@@ -117,30 +164,94 @@ class DetectorRT:
     """
     Open the camera and then do basic capture settings.
     """
-    self.cap = cv2.VideoCapture(self.camera_index, cv2.CAP_V4L2)
-    if not self.cap.isOpened():
-      logger.error("Could not open camera.")
-      raise RuntimeError("Camera open failed.")
+    with self._singleton_open:
+      if DetectorRT._is_open:
+        logger.warning("DetectorRT.open() called but camera is already open; ignoring.")
+        return
 
-    # idk if this actuall does anything -- i just saw this on some tutorial
-    self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
-    self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
-    self.cap.set(cv2.CAP_PROP_FPS, self.fps)
+      def _try_open(width, height, fps, fourcc=None):
+        cap = cv2.VideoCapture(self.camera_index, cv2.CAP_V4L2)
 
-    self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1) # Reduce Latency
+        if not cap.isOpened():
+          return None
 
-    # Keep exposure short enough for 30 fps; disable auto if needed
-    self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1)
-    self.cap.set(cv2.CAP_PROP_EXPOSURE, -6)
+        if fourcc is not None:
+          cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*fourcc))
+
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+        cap.set(cv2.CAP_PROP_FPS, fps)
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1) # low latency
+        cap.set(cv2.CAP_PROP_CONVERT_RGB, 1)
+
+        # Prefer AUTO exposure that V4L2 actually honors (0.75 commonly maps to AUTO)
+        cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.75)
+        cap.set(cv2.CAP_PROP_AUTO_WB, 1)
+        return cap
+
+      attempts = [
+        (self.width, self.height, self.fps, 'MJPG'), # requested (e.g., 1920x1080@30 MJPG)
+        (1280, 720, 30, 'MJPG'),                     # C920 safe profile
+        (640, 480, 30, None),                        # fallback (i think i got YUYV?)
+      ]
+
+      self.cap = None
+
+      for (w, h, fps, fcc) in attempts:
+        cap = _try_open(w, h, fps, fcc)
+        if cap is None:
+          continue
+
+        # Warm-up + “not black” check
+        ok_count, t0 = 0, time.time()
+        while time.time() - t0 < 2.0:
+          ok, frm = cap.read()
+          if ok and frm is not None and frm.mean() > 2.0:
+            ok_count += 1
+            if ok_count >= 3:
+              self.cap = cap
+              self.width, self.height, self.fps = w, h, fps
+              break
+          time.sleep(0.01)
+
+        if self.cap is not None:
+          break
+        cap.release()
+
+      if self.cap is None:
+        logger.error("Could not open camera after multiple attempts.")
+        raise RuntimeError("Camera open failed.")
+
+      got_w = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+      got_h = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+      got_fps = float(self.cap.get(cv2.CAP_PROP_FPS))
+      fourcc = int(self.cap.get(cv2.CAP_PROP_FOURCC))
+      fcc_text = "".join([chr((fourcc >> (8*i)) & 0xFF) for i in range(4)]).strip()
+      logger.info(f"Camera opened at {got_w}x{got_h} @ {got_fps:.1f} FPS ({fcc_text or 'RAW'})")
+
+      DetectorRT._is_open = True
+
+  def latest(self):
+    """
+    Return (frame, results) of the most recent processed frame without 
+    reading the camera.
+    """
+    with self._latest_lock:
+      frame = None if self._latest_frame is None else self._latest_frame.copy()
+    return frame, self.last_results
 
   def release(self):
     """
     Release camera and detroy and open windows.
     """
     if self.cap is not None:
-      self.cap.release()
+      with self._cap_lock:
+        self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.75)  # AUTO
+        self.cap.set(cv2.CAP_PROP_AUTO_WB, 1)
+        self.cap.release()
       self.cap = None
     cv2.destroyAllWindows()
+    DetectorRT._is_open = False
 
   def read(self):
     """
@@ -159,17 +270,37 @@ class DetectorRT:
       logger.error("Call open() before read().")
       raise RuntimeError("Call open() before read().")
 
-    ok, frame = self.cap.read()
+    with self._cap_lock:
+      ok, frame = self.cap.read()
     if not ok or frame is None:
-      return None, {}
+      logger.warning("Camera read failed; attempting one-shot reopen…")
+      try:
+        self.release()
+        self.open()
+        with self._cap_lock:
+          ok, frame = self.cap.read()
+      except Exception as e:
+        logger.error(f"Reopen failed: {e}")
+        return None, {}
+      if not ok or frame is None:
+        return None, {}
 
     corners, ids, _ = self.detector.detectMarkers(frame)
     rvecs = tvecs = None
     dists: List[float] = []
+    # Reset the occupied cells per frame
+    self._occupied_cells = set()
 
     if ids is not None and len(ids) > 0:
       # Draw the detected boundaries and their IDs
       cv2.aruco.drawDetectedMarkers(frame, corners, ids)
+      # Compute centers and map to grid cells
+      h, w = frame.shape[:2]
+      for corner in corners:
+        # corner shape: (1, 4, 2) -> take the mean over the 4 corner points
+        center = np.mean(corner[0], axis=0) # x, y
+        cell = self._point_to_cell(center[0], center[1], w, h)
+        self._occupied_cells.add(cell)
 
       if self._do_pose:
         rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(corners, 
@@ -215,6 +346,11 @@ class DetectorRT:
     }
 
     self._overlay_grid(frame)
+    self._mark_occupied(frame) # Highlight the occupied cells and then draw grid
+    self.last_results = results
+
+    with self._latest_lock:
+      self._latest_frame = frame.copy()   # small cost; safe for readers
     self.last_results = results
 
     return frame, results
@@ -228,9 +364,17 @@ class DetectorRT:
     corners, ids, _ = self.detector.detectMarkers(frame)
     rvecs = tvecs = None
     dists: List[float] = []
+    self._occupied_cells = set()
 
     if ids is not None and len(ids) > 0:
       cv2.aruco.drawDetectedMarkers(frame, corners, ids)
+      # centers -> occupied grid cells
+      h, w = frame.shape[:2]
+      for corner in corners:
+        center = np.mean(corner[0], axis=0)
+        cell = self._point_to_cell(center[0], center[1], w, h)
+        self._occupied_cells.add(cell)
+
       if self._do_pose:
         rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(corners, 
                                                               self.marker_length_m, 
@@ -249,6 +393,7 @@ class DetectorRT:
           dists = [float(np.linalg.norm(t)) for t in tvecs]
 
     self._overlay_grid(frame)
+    self._mark_occupied(frame)
 
     return {
       "ids": ids,
@@ -265,3 +410,18 @@ class DetectorRT:
       raise FileNotFoundError(f"Calibration file not found: {calib_p}")
     data = np.load(str(calib_p))
     return data["camera_matrix"], data["dist_coeffs"]
+
+def primary_target(results, frame_shape):
+  """
+  Return (cx, cy, area_px) of the first detected marker, or None.
+  """
+  corners = results.get("corners")
+  if corners is None or len(corners) == 0:
+    return None
+  # corners[i]: shape (1, 4, 2); take mean for centroid & polygon area
+  c = corners[0][0]             # (4,2)
+  cx, cy = float(c[:,0].mean()), float(c[:,1].mean())
+  # approximate area by contour area (pixel^2)
+  area = float(cv2.contourArea(c.astype(np.float32)))
+  H, W = frame_shape[:2]
+  return (cx, cy, area, W, H)
