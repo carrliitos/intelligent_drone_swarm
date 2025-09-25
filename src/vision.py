@@ -196,7 +196,7 @@ class DetectorRT:
       ]
 
       self.cap = None
-      
+
       for (w, h, fps, fcc) in attempts:
         cap = _try_open(w, h, fps, fcc)
         if cap is None:
@@ -245,13 +245,13 @@ class DetectorRT:
     Release camera and detroy and open windows.
     """
     if self.cap is not None:
-      # Put camera back to AUTO so the next run doesn’t start “dark”
       with self._cap_lock:
-        self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 3)  # AUTO
+        self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.75)  # AUTO
         self.cap.set(cv2.CAP_PROP_AUTO_WB, 1)
         self.cap.release()
       self.cap = None
     cv2.destroyAllWindows()
+    DetectorRT._is_open = False
 
   def read(self):
     """
