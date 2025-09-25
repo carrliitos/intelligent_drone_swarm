@@ -112,7 +112,7 @@ class DroneLogs:
               self.stateEstimate_vx, self.stateEstimate_vy, self.stateEstimate_vz,
               self.range_zrange,
               self.stateEstimate_roll, self.stateEstimate_pitch, self.stateEstimate_yaw,
-              self.kalman_varPX, self.kalman_varPY, self.kalman_varPXZ,
+              self.kalman_varPX, self.kalman_varPY, self.kalman_varPZ,
               self.gyro_x, self.gyro_y, self.gyro_z,
               self.pm_vbatMV, self.pm_batteryLevel,
               self.motor_m1, self.motor_m2, self.motor_m3, self.motor_m4,
