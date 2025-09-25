@@ -87,6 +87,10 @@ def run(connection_type, use_vision=False, swarm_uris=None):
         # Loop to display annotated frames
         while not stop_vision.is_set():
           frame, results = detector.read()
+
+          if frame is not None:
+            logger.debug(f"preview mean={frame.mean():.1f}, shape={frame.shape}")
+
           if frame is None:
             if time.time() - last_ok > 1.0:
               logger.warning("No camera frames for >1s; check USB bandwidth, device index, or conflicts.")
