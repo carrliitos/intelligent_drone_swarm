@@ -273,7 +273,17 @@ class DetectorRT:
     with self._cap_lock:
       ok, frame = self.cap.read()
     if not ok or frame is None:
-      return None, {}
+      logger.warning("Camera read failed; attempting one-shot reopen…")
+      try:
+        self.release()
+        self.open()
+        with self._cap_lock:
+          ok, frame = self.cap.read()
+      except Exception as e:
+        logger.error(f"Reopen failed: {e}")
+        return None, {}
+      if not ok or frame is None:
+        return None, {}
 
     corners, ids, _ = self.detector.detectMarkers(frame)
     rvecs = tvecs = None
