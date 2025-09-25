@@ -23,6 +23,8 @@ logger_name = Path(__file__).stem
 logger_file = f"{directory}/logs/{logger_file_name}.log"
 logger = logger.setup_logger(logger_name, logger_file)
 
+calibration_path = f"{directory}/src/utils/calibration_imgs/cam_param.npz"
+
 UDP = "udp://192.168.43.51:2390"
 RADIO_CHANNELS = {
   "7": "radio://0/80/2M/E7E7E7E7E7",
@@ -43,7 +45,8 @@ def run(connection_type, use_vision=False, swarm_uris=None):
   swarm_cmd = SwarmCommand(swarm_uris) if swarm_uris else None
   command = Command(drone=drone, 
                     drone_logger=drone_logger, 
-                    swarm=swarm_cmd)
+                    swarm=swarm_cmd,
+                    takeoff_alt=0.25)
   detector = None
   vision_thread = None
   stop_vision = threading.Event()
@@ -57,42 +60,84 @@ def run(connection_type, use_vision=False, swarm_uris=None):
       logger.info("==========Connecting to OpenCV==========")
       detector = DetectorRT(
         dictionary="4x4_1000",
-        camera=2,
-        calib_path=None,
-        marker_length_m=None,
-        draw_axes=True,
+        camera=0,
+        calib_path=calibration_path,
+        marker_length_m=0.025,
+        width=1920, 
+        height=1080, 
+        fps=30,
+        draw_axes=False,
         # Draw grid
-        draw_grid=True,
+        draw_grid=False,
         grid_step_px=40,
         draw_rule_of_thirds=False,
         draw_crosshair=False
       )
       detector.open()
 
+      WIN_NAME = "Intelligent Drone Swarm (ArUco)"
+      cv2.namedWindow(WIN_NAME, cv2.WINDOW_NORMAL)
+      cv2.resizeWindow(WIN_NAME, 960, 540)  # initial preview size
+
       def _vision_loop():
+        # Max preview box; capture stays full-res
+        max_w, max_h = 960, 540
+
         # Loop to display annotated frames
         while not stop_vision.is_set():
           frame, results = detector.read()
           if frame is None:
             continue
+
+          # display-only resize: keep aspect ratio
+          h, w = frame.shape[:2]
+          scale = min(max_w / w, max_h / h, 1.0)
+          display = frame if scale >= 1.0 else cv2.resize(frame, (int(w*scale), int(h*scale)))
+
           # Log detections
           ids = results.get("ids")
           if ids is not None:
             try:
               flat_ids = [int(x[0]) for x in ids]
+              logger.debug(f"Aruco IDs: {flat_ids}")
             except Exception:
               pass
 
           try:
-            cv2.imshow("Intelligent Drone Swarm (ArUco)", frame)
+            cv2.imshow(WIN_NAME, display)
+            time.sleep(0.001)
+
             if (cv2.waitKey(1) & 0xFF) == 27:  # ESC to close vision
               stop_vision.set()
               break
           except Exception:
             pass
 
+        # Cleanup this window when the loop stops
+        try:
+          cv2.destroyWindow(WIN_NAME)
+        except Exception:
+          pass
+
       vision_thread = threading.Thread(target=_vision_loop, daemon=True)
       vision_thread.start()
+
+      ctrl_stop = threading.Event()
+      def _ctrl_loop():
+        try:
+          command.follow_target_ibvs(
+            detector=detector,
+            stop_event=ctrl_stop,
+            start_event=command.ibvs_enable_event,
+            desired_area_px=10000,
+            loop_hz=20,
+            use_vertical=True
+          )
+        except Exception as e:
+          logger.error(f"IBVS error: {e}")
+      ctrl_thread = threading.Thread(target=_ctrl_loop, daemon=True)
+      ctrl_thread.start()
+
     time.sleep(5.0)
 
     logger.info("==========Connecting to PyGame==========")
@@ -109,6 +154,10 @@ def run(connection_type, use_vision=False, swarm_uris=None):
       if vision_thread:
         vision_thread.join(timeout=2.0)
       try:
+        ctrl_stop.set()
+        if 'ctrl_thread' in locals():
+          ctrl_thread.join(timeout=2.0)
+
         detector.release()
       except Exception:
         pass
