@@ -20,6 +20,9 @@ class DetectorRT:
   Real-time ArUco detection and pose estimation.
   """
 
+  _singleton_open = threading.Lock()
+  _is_open = False
+
   _DICT_NAME_TO_ENUM = {
     "4x4_50":   cv2.aruco.DICT_4X4_50,
     "4x4_100":  cv2.aruco.DICT_4X4_100,
@@ -161,40 +164,72 @@ class DetectorRT:
     """
     Open the camera and then do basic capture settings.
     """
-    self.cap = cv2.VideoCapture(self.camera_index, cv2.CAP_V4L2)
-    if not self.cap.isOpened():
-      logger.error("Could not open camera.")
-      raise RuntimeError("Camera open failed.")
+    with self._singleton_open:
+      if DetectorRT._is_open:
+        logger.warning("DetectorRT.open() called but camera is already open; ignoring.")
+        return
 
-    ### IMPORTANT: Specific to C920 at 720p/1080p ###
-    self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+      def _try_open(width, height, fps, fourcc=None):
+        cap = cv2.VideoCapture(self.camera_index, cv2.CAP_V4L2)
 
-    # Request resolution/FPS
-    self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
-    self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
-    self.cap.set(cv2.CAP_PROP_FPS, self.fps)
+        if not cap.isOpened():
+          return None
 
-    self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1) # Reduce Latency
-    self.cap.set(cv2.CAP_PROP_CONVERT_RGB, 1) # Ensure RGB conversion
+        if fourcc is not None:
+          cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*fourcc))
 
-    # Hard toggle exposure to known-good AUTO state
-    # V4L2 expects '3' for auto. Some OpenCV builds also accept 0.75
-    self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1) # manual (kick)
-    self.cap.set(cv2.CAP_PROP_EXPOSURE, -4) # safe-ish dummy (ignored in AUTO)
-    self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 3) # AUTO (V4L2)
-    self.cap.set(cv2.CAP_PROP_AUTO_WB, 1)
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+        cap.set(cv2.CAP_PROP_FPS, fps)
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1) # low latency
+        cap.set(cv2.CAP_PROP_CONVERT_RGB, 1)
 
-    # Warm-up: grab a few frames so auto-exposure converges
-    for _ in range(10):
-      ok, _ = self.cap.read()
-      if not ok:
-        break
+        # Prefer AUTO exposure that V4L2 actually honors (0.75 commonly maps to AUTO)
+        cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.75)
+        cap.set(cv2.CAP_PROP_AUTO_WB, 1)
+        return cap
 
-    # Sanity checks
-    got_w = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    got_h = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    got_fps = float(self.cap.get(cv2.CAP_PROP_FPS))
-    logger.info(f"Camera opened at {got_w}x{got_h} @ {got_fps:.1f} FPS (MJPG)")
+      attempts = [
+        (self.width, self.height, self.fps, 'MJPG'), # requested (e.g., 1920x1080@30 MJPG)
+        (1280, 720, 30, 'MJPG'),                     # C920 safe profile
+        (640, 480, 30, None),                        # fallback (i think i got YUYV?)
+      ]
+
+      self.cap = None
+
+      for (w, h, fps, fcc) in attempts:
+        cap = _try_open(w, h, fps, fcc)
+        if cap is None:
+          continue
+
+        # Warm-up + “not black” check
+        ok_count, t0 = 0, time.time()
+        while time.time() - t0 < 2.0:
+          ok, frm = cap.read()
+          if ok and frm is not None and frm.mean() > 2.0:
+            ok_count += 1
+            if ok_count >= 3:
+              self.cap = cap
+              self.width, self.height, self.fps = w, h, fps
+              break
+          time.sleep(0.01)
+
+        if self.cap is not None:
+          break
+        cap.release()
+
+      if self.cap is None:
+        logger.error("Could not open camera after multiple attempts.")
+        raise RuntimeError("Camera open failed.")
+
+      got_w = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+      got_h = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+      got_fps = float(self.cap.get(cv2.CAP_PROP_FPS))
+      fourcc = int(self.cap.get(cv2.CAP_PROP_FOURCC))
+      fcc_text = "".join([chr((fourcc >> (8*i)) & 0xFF) for i in range(4)]).strip()
+      logger.info(f"Camera opened at {got_w}x{got_h} @ {got_fps:.1f} FPS ({fcc_text or 'RAW'})")
+
+      DetectorRT._is_open = True
 
   def latest(self):
     """
@@ -210,13 +245,13 @@ class DetectorRT:
     Release camera and detroy and open windows.
     """
     if self.cap is not None:
-      # Put camera back to AUTO so the next run doesn’t start “dark”
       with self._cap_lock:
-        self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 3)  # AUTO
+        self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.75)  # AUTO
         self.cap.set(cv2.CAP_PROP_AUTO_WB, 1)
         self.cap.release()
       self.cap = None
     cv2.destroyAllWindows()
+    DetectorRT._is_open = False
 
   def read(self):
     """
@@ -238,7 +273,17 @@ class DetectorRT:
     with self._cap_lock:
       ok, frame = self.cap.read()
     if not ok or frame is None:
-      return None, {}
+      logger.warning("Camera read failed; attempting one-shot reopen…")
+      try:
+        self.release()
+        self.open()
+        with self._cap_lock:
+          ok, frame = self.cap.read()
+      except Exception as e:
+        logger.error(f"Reopen failed: {e}")
+        return None, {}
+      if not ok or frame is None:
+        return None, {}
 
     corners, ids, _ = self.detector.detectMarkers(frame)
     rvecs = tvecs = None
