@@ -1,11 +1,11 @@
-cflib==0.1.28
+cflib==0.1.29
 importlib_resources==6.5.2
--e git+ssh://git@github.com/carrliitos/intelligent_drone_swarm.git@9e6840a65ff5e74a9b8a5f1b002955efb11d260f#egg=intelligent_drone_swarm
+-e git+ssh://git@github.com/carrliitos/intelligent_drone_swarm.git@033723e111ecc426d4861c53b34f2cc763404d64#egg=intelligent_drone_swarm
 libusb-package==1.0.26.3
-numpy==1.26.4
-opencv-contrib-python==4.11.0.86
-opencv-python==4.11.0.86
-packaging==24.2
+numpy==2.2.6
+opencv-contrib-python==4.12.0.88
+opencv-python==4.12.0.88
+packaging==25.0
 pandas==2.3.2
 pygame==2.6.1
 python-dateutil==2.9.0.post0
