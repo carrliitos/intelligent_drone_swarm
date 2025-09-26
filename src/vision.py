@@ -61,6 +61,7 @@ class DetectorRT:
     self.fps = fps
     self.window_title = window_title
     self.draw_axes = draw_axes
+    self.min_brightness = 2.0 # brightness threshold: Require frames to have mean brightness > 2.0 before accepting camera open
 
     # Pose estimation stuff
     self.marker_length_m = marker_length_m
@@ -206,7 +207,7 @@ class DetectorRT:
         ok_count, t0 = 0, time.time()
         while time.time() - t0 < 2.0:
           ok, frm = cap.read()
-          if ok and frm is not None and frm.mean() > 2.0:
+          if ok and frm is not None and frm.mean() > self.min_brightness:
             ok_count += 1
             if ok_count >= 3:
               self.cap = cap
