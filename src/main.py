@@ -73,6 +73,7 @@ def run(connection_type, use_vision=False, use_control=False, swarm_uris=None):
         height=1080, 
         fps=30,
         draw_axes=False,
+        allowed_ids=[249],
         # Draw grid
         draw_grid=False,
         grid_step_px=40,

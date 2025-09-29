@@ -41,6 +41,7 @@ class DetectorRT:
     marker_length_m: Optional[float] = None,
     window_title: str = "Intelligent Drone Swarm",
     draw_axes: bool = True,
+    allowed_ids: Optional[List[int]] = None,
     # Draw grid
     draw_grid: bool = True,
     grid_step_px: int = 40,
@@ -62,6 +63,7 @@ class DetectorRT:
     self.window_title = window_title
     self.draw_axes = draw_axes
     self.min_brightness = 2.0 # brightness threshold: Require frames to have mean brightness > 2.0 before accepting camera open
+    self.allowed_ids = set(allowed_ids) if allowed_ids is not None else None
 
     # Pose estimation stuff
     self.marker_length_m = marker_length_m
@@ -287,6 +289,7 @@ class DetectorRT:
         return None, {}
 
     corners, ids, _ = self.detector.detectMarkers(frame)
+    corners, ids = self._filter_known(corners, ids, self.allowed_ids)
     rvecs = tvecs = None
     dists: List[float] = []
     # Reset the occupied cells per frame
@@ -363,6 +366,7 @@ class DetectorRT:
     in-place with overlays.
     """
     corners, ids, _ = self.detector.detectMarkers(frame)
+    corners, ids = self._filter_known(corners, ids, self.allowed_ids)
     rvecs = tvecs = None
     dists: List[float] = []
     self._occupied_cells = set()
@@ -411,6 +415,26 @@ class DetectorRT:
       raise FileNotFoundError(f"Calibration file not found: {calib_p}")
     data = np.load(str(calib_p))
     return data["camera_matrix"], data["dist_coeffs"]
+
+  @staticmethod
+  def _filter_known(corners, ids, allowed: Optional[set]):
+    """
+    Keep only markers whose ID is in 'allowed'. Preserves correspondence between
+    corners[i] and ids[i]. Returns (corners_filt, ids_filt or None).
+    """
+    if ids is None or len(ids) == 0 or allowed is None:
+      return corners, ids
+    keep_corners = []
+    keep_ids = []
+    # ids is shape (N,1); flatten to iterate
+    for corner, mid in zip(corners, ids.flatten()):
+      if mid in allowed:
+        keep_corners.append(corner)
+        keep_ids.append(mid)
+    if not keep_ids:
+      return [], None
+    ids_out = np.array(keep_ids, dtype=np.int32).reshape(-1, 1)
+    return keep_corners, ids_out
 
 def primary_target(results, frame_shape):
   """
