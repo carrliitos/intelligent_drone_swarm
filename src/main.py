@@ -38,7 +38,7 @@ RADIO_CHANNELS = {
 _latest_frame_lock = threading.Lock()
 _latest_frame_np = None
 
-def run(connection_type, use_vision=False, swarm_uris=None):
+def run(connection_type, use_vision=False, use_control=False, swarm_uris=None):
   cflib.crtp.init_drivers(enable_debug_driver=False)
   time.sleep(1.0)
 
@@ -108,25 +108,26 @@ def run(connection_type, use_vision=False, swarm_uris=None):
       vision_thread = threading.Thread(target=_vision_loop, daemon=True)
       vision_thread.start()
 
-      ctrl_stop = threading.Event()
-      def _ctrl_loop():
-        try:
-          command.follow_target_servo(
-            detector=detector,
-            stop_event=ctrl_stop,
-            start_event=command.ibvs_enable_event,
-            loop_hz=50,
-            gains=dict(Kpx=0.6, Kdx=0.2,
-                       Kpy=0.6, Kdy=0.2,
-                       Kpz=1.0, Kiz=0.2,
-                       Kpyaw=2.0, Kdyaw=0.3),
-            vision_yaw_alpha=0.05,
-            forward_nudge_alpha=0.03
-          )
-        except Exception as e:
-          logger.error(f"Servo error: {e}")
-      ctrl_thread = threading.Thread(target=_ctrl_loop, daemon=True)
-      ctrl_thread.start()
+      if use_control:
+        ctrl_stop = threading.Event()
+        def _ctrl_loop():
+          try:
+            command.follow_target_servo(
+              detector=detector,
+              stop_event=ctrl_stop,
+              start_event=command.ibvs_enable_event,
+              loop_hz=50,
+              gains=dict(Kpx=0.6, Kdx=0.2,
+                         Kpy=0.6, Kdy=0.2,
+                         Kpz=1.0, Kiz=0.2,
+                         Kpyaw=2.0, Kdyaw=0.3),
+              vision_yaw_alpha=0.05,
+              forward_nudge_alpha=0.03
+            )
+          except Exception as e:
+            logger.error(f"Servo error: {e}")
+        ctrl_thread = threading.Thread(target=_ctrl_loop, daemon=True)
+        ctrl_thread.start()
 
     time.sleep(5.0)
 
@@ -144,10 +145,10 @@ def run(connection_type, use_vision=False, swarm_uris=None):
       if vision_thread:
         vision_thread.join(timeout=2.0)
       try:
-        ctrl_stop.set()
+        if 'ctrl_stop' in locals():
+          ctrl_stop.set()
         if 'ctrl_thread' in locals():
           ctrl_thread.join(timeout=2.0)
-
         detector.release()
       except Exception:
         pass
@@ -161,10 +162,12 @@ def run(connection_type, use_vision=False, swarm_uris=None):
 
 def print_usage():
   print("Usage:")
-  print("  fly udp")
-  print("  fly radio [7|8|9]")
-  print("  (append 'vision' to enable ArUco webcam)")
-  print("  fly swarm <channels ...> # e.g. swarm 7, 8, 9")
+  print("  fly udp [vision] [control]")
+  print("  fly radio <7|8|9> [vision] [control]")
+  print("  fly swarm <channels ...>  # e.g., swarm 7 8 9  (not shown here)")
+  print("Notes:")
+  print("  - 'vision' starts the ArUco webcam preview thread")
+  print("  - 'control' starts the IBVS control loop (requires 'vision')")
   sys.exit(1)
 
 def cli():
@@ -172,33 +175,38 @@ def cli():
     logger.error("Missing connection type argument.")
     print_usage()
 
-  arg = sys.argv[1].lower()
+  args = [a.lower() for a in sys.argv[1:]]
   connection_type = None
   use_vision = False
+  use_control = False
 
-  if arg == "udp":
+  if args[0] == "udp":
     connection_type = UDP
-  elif arg == "radio":
-    if len(sys.argv) < 3:
+    extras = set(args[1:])  # flags like 'vision', 'control'
+  elif args[0] == "radio":
+    if len(args) < 2:
       logger.error("Missing radio channel argument.")
       print_usage()
-    channel = sys.argv[2]
+    channel = args[1]
     if channel in RADIO_CHANNELS:
       connection_type = RADIO_CHANNELS[channel]
     else:
       logger.error(f"Invalid radio channel: {channel}")
       print_usage()
+    extras = set(args[2:])
   else:
-    logger.error(f"Invalid connection type: {arg}")
+    logger.error(f"Invalid connection type: {args[0]}")
     print_usage()
 
-  if len(sys.argv) >= 3 and sys.argv[-1].lower() == "vision":
-    use_vision = True
-  if len(sys.argv) >= 4 and sys.argv[3].lower() == "vision":
-    use_vision = True
+  use_vision = "vision" in extras
+  use_control = "control" in extras
 
-  logger.info(f"Using connection: {connection_type}")
-  run(connection_type, use_vision=use_vision)
+  if use_control and not use_vision:
+    logger.warning("`control` requested without `vision`; disabling control.")
+    use_control = False
+
+  logger.info(f"Using connection: {connection_type}  | vision={use_vision} control={use_control}")
+  run(connection_type, use_vision=use_vision, use_control=use_control)
 
 if __name__ == '__main__':
   cli()
