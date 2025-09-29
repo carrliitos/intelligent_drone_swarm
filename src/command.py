@@ -54,8 +54,8 @@ class Command:
     self._l_was_down = False      # for 'L' edge detection
     self._g_was_down = False      # for 'G' edge detection (enter manual)
     self._s_was_down = False      # for 'S' edge (enter swarm manual)
-    self.speed_xy = 0.50          # m/s
-    self.speed_z  = 0.50          # m/s
+    self.speed_xy = 1.0           # m/s
+    self.speed_z  = 1.0           # m/s
     self.yaw_rate = 90.0          # deg/s
     self.takeoff_alt = takeoff_alt # m
 
@@ -173,7 +173,7 @@ class Command:
           self.mc = MotionCommander(self.scf)
         # If already flying via another mode, this will raise; so only take_off if not flying
         try:
-          self.mc.take_off(self.takeoff_alt, velocity=0.4)
+          self.mc.take_off(self.takeoff_alt, velocity=1.0)
         except Exception as e:
           # Already flying? That's fine; continue.
           pass
