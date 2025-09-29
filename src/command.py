@@ -410,6 +410,19 @@ class Command:
         x, y = pad_x, info_y + pad_y
         clock = pygame.time.Clock()
 
+        try:
+          main_mod = sys.modules.get('main') or importlib.import_module('main')
+          with main_mod._latest_frame_lock:
+            ids_list = list(dict.fromkeys(getattr(main_mod, "_latest_ids", [])))
+          ids_list.sort()
+        except Exception:
+          ids_list = []
+
+        ids_text = "IDs: " + (", ".join(map(str, ids_list)) if ids_list else "—")
+        txt_ids = font.render(ids_text, True, (120, 200, 255))
+        screen.blit(txt_ids, (x, y))
+        y += txt_ids.get_height() + 10
+
         for line in instructions:
           txt = font.render(line, True, (230, 230, 230))
           screen.blit(txt, (x, y))

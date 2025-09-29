@@ -37,6 +37,7 @@ RADIO_CHANNELS = {
 
 _latest_frame_lock = threading.Lock()
 _latest_frame_np = None
+_latest_ids = []
 
 def run(connection_type, use_vision=False, use_control=False, swarm_uris=None):
   cflib.crtp.init_drivers(enable_debug_driver=False)
@@ -86,7 +87,7 @@ def run(connection_type, use_vision=False, use_control=False, swarm_uris=None):
         max_w, max_h = 960, 540
         last_ok = time.time()
         while not stop_vision.is_set():
-          frame, _ = detector.read()
+          frame, results = detector.read()
           if frame is None:
             if time.time() - last_ok > 1.0:
               logger.warning("No camera frames for >1s; check USB bandwidth, device index, or conflicts.")
@@ -102,9 +103,12 @@ def run(connection_type, use_vision=False, use_control=False, swarm_uris=None):
 
           # Store latest frame (BGR -> RGB) for pygame
           global _latest_frame_np
+          global _latest_ids
           rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
           with _latest_frame_lock:
             _latest_frame_np = np.ascontiguousarray(rgb)
+            ids = results.get("ids")
+            _latest_ids = [] if ids is None else [int(i) for i in ids.flatten()]
 
       vision_thread = threading.Thread(target=_vision_loop, daemon=True)
       vision_thread.start()
