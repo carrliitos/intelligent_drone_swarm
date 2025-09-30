@@ -34,8 +34,8 @@ class DetectorRT:
     self,
     dictionary: str = "4x4_1000",
     camera: int = 2, # USB-connected camera
-    width: int = 640,
-    height: int = 480,
+    width: int = 1280,
+    height: int = 720,
     fps: int = 30,
     calib_path: Optional[str] = None,
     marker_length_m: Optional[float] = None,
@@ -193,9 +193,11 @@ class DetectorRT:
         return cap
 
       attempts = [
-        (self.width, self.height, self.fps, 'MJPG'), # requested (e.g., 1920x1080@30 MJPG)
-        (1280, 720, 30, 'MJPG'),                     # C920 safe profile
-        (640, 480, 30, None),                        # fallback (i think i got YUYV?)
+        (self.width, self.height, self.fps, 'MJPG'), # requested (1280x720@30 MJPG)
+        (1280, 720, 30, 'MJPG'),                     # UVC default profile
+        (640, 480, 30, 'MJPG'),                      # lower-res MJPG (keeps JPEG decode path)
+        (640, 480, 30, None),                        # fallback
+        (640, 480, 30, 'YUYV'),                      # uncompressed fallback (full FPS at VGA)
       ]
 
       self.cap = None
