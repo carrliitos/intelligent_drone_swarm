@@ -1,3 +1,7 @@
 #!/bin/bash
-echo "=== $(date) ===" >> camera_settings_log.txt
-v4l2-ctl -d /dev/video2 --all >> camera_settings_log.txt
+timestamp=$(date +"%Y-%m-%d_%H-%M-%S")
+outfile="camera_settings_${timestamp}.txt"
+
+v4l2-ctl -d /dev/video2 --all > "$outfile"
+
+echo "Saved camera settings to $outfile"
