@@ -8,6 +8,7 @@ import cv2
 import numpy as np
 import os
 import threading
+from contextlib import contextmanager
 
 from utils import logger, context
 
@@ -16,6 +17,22 @@ logger_file_name = Path(directory).stem
 logger_name = Path(__file__).stem
 logger = logger.setup_logger(logger_name, f"{directory}/logs/{logger_file_name}.log")
 load_dotenv(dotenv_path="config/.env") 
+
+@contextmanager
+def suppress_stderr():
+  """
+  Temporarily silence libjpeg MJPG warnings written to stderr during cap.read().
+  Keep the scope as small as possible since this is process-wide.
+  """
+  fd = sys.stderr.fileno()
+  saved = os.dup(fd)
+  try:
+    with open(os.devnull, "w") as devnull:
+      os.dup2(devnull.fileno(), fd)
+    yield
+  finally:
+    os.dup2(saved, fd)
+    os.close(saved)
 
 class DetectorRT:
   """
@@ -195,9 +212,11 @@ class DetectorRT:
         return cap
 
       attempts = [
-        (self.width, self.height, self.fps, 'MJPG'), # requested (e.g., 1920x1080@30 MJPG)
-        (1280, 720, 30, 'MJPG'),                     # C920 safe profile
-        (640, 480, 30, None),                        # fallback (i think i got YUYV?)
+        (self.width, self.height, self.fps, 'MJPG'), # requested (1280x720@30 MJPG)
+        (1280, 720, 30, 'MJPG'),                     # UVC default profile
+        (640, 480, 30, 'MJPG'),                      # lower-res MJPG (keeps JPEG decode path)
+        (640, 480, 30, None),                        # fallback
+        (640, 480, 30, 'YUYV'),                      # uncompressed fallback (full FPS at VGA)
       ]
 
       self.cap = None
@@ -210,7 +229,8 @@ class DetectorRT:
         # Warm-up + “not black” check
         ok_count, t0 = 0, time.time()
         while time.time() - t0 < 2.0:
-          ok, frm = cap.read()
+          with suppress_stderr():
+            ok, frm = cap.read()
           if ok and frm is not None and frm.mean() > self.min_brightness:
             ok_count += 1
             if ok_count >= 3:
@@ -276,14 +296,16 @@ class DetectorRT:
       raise RuntimeError("Call open() before read().")
 
     with self._cap_lock:
-      ok, frame = self.cap.read()
+      with suppress_stderr():
+        ok, frame = self.cap.read()
     if not ok or frame is None:
       logger.warning("Camera read failed; attempting one-shot reopen…")
       try:
         self.release()
         self.open()
         with self._cap_lock:
-          ok, frame = self.cap.read()
+          with suppress_stderr():
+            ok, frame = self.cap.read()
       except Exception as e:
         logger.error(f"Reopen failed: {e}")
         return None, {}

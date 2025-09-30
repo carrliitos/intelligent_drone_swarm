@@ -11,6 +11,9 @@ data/figs/*.png
 src/utils/calibration_imgs/*
 !src/utils/calibration_imgs/.gitkeep
 !src/utils/calibration_imgs/ChArUco_Marker.png
+src/utils/bash/*
+!src/utils/bash/.gitkeep
+!src/utils/bash/cam_settings_dump.sh
 
 docs/*
 !docs/.gitkeep
