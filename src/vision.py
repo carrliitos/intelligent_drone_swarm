@@ -59,7 +59,7 @@ class DetectorRT:
     calib_path: Optional[str] = None,
     marker_length_m: Optional[float] = None,
     window_title = str(os.getenv("WINDOW_TITLE")),
-    draw_axes: bool = True, ##
+    draw_axes: bool = True,
     allowed_ids: Optional[List[int]] = None,
     # Draw grid
     draw_grid: bool = True,
@@ -101,8 +101,8 @@ class DetectorRT:
     # State
     self.cap = None
     self._fps_prev = time.time()
-    self._fps_counter = int(os.getenv("FPS_COUNTER" , 0))
-    self._fps_display = int(os.getenv("FPS_DISPLAY" , 0.0))
+    self._fps_counter = int(value) if (value := os.getenv("FPS_COUNTER")) is not None else 0
+    self._fps_display = float(value) if (value := os.getenv("FPS_DISPLAY")) is not None else 0.0
     self.last_results: Dict[str, Any] = {}
 
     self.draw_grid = draw_grid
