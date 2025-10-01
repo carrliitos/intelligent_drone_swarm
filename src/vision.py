@@ -2,6 +2,7 @@ from pathlib import Path
 import time
 import sys
 from typing import Optional, Tuple, Dict, Any, List
+from dotenv import load_dotenv
 
 import cv2
 import numpy as np
@@ -15,6 +16,7 @@ directory = context.get_context(os.path.abspath(__file__))
 logger_file_name = Path(directory).stem
 logger_name = Path(__file__).stem
 logger = logger.setup_logger(logger_name, f"{directory}/logs/{logger_file_name}.log")
+load_dotenv(dotenv_path="config/.env") 
 
 @contextmanager
 def suppress_stderr():
@@ -49,21 +51,21 @@ class DetectorRT:
 
   def __init__(
     self,
-    dictionary: str = "4x4_1000",
-    camera: int = 2, # USB-connected camera
-    width: int = 1280,
-    height: int = 720,
-    fps: int = 30,
+    dictionary = str(os.getenv("ARUCO_DICTIONARY")),
+    camera = int(os.getenv("CAMERA_CONNECTION")), # USB-connected camera
+    width = int(os.getenv("CAMERA_WIDTH")),
+    height = int(os.getenv("CAMERA_HEIGHT")),
+    fps = int(os.getenv("CAMERA_FPS")),
     calib_path: Optional[str] = None,
     marker_length_m: Optional[float] = None,
-    window_title: str = "Intelligent Drone Swarm",
+    window_title = str(os.getenv("WINDOW_TITLE")),
     draw_axes: bool = True,
     allowed_ids: Optional[List[int]] = None,
     # Draw grid
     draw_grid: bool = True,
-    grid_step_px: int = 40,
-    grid_color: Tuple[int, int, int] = (60, 220, 60),
-    grid_thickness: int = 1,
+    grid_step_px = int(os.getenv("GRID_STEP_PX")),
+    grid_color = tuple(map(int, os.getenv("GRID_COLOR").split(","))),
+    grid_thickness = int(os.getenv("GRID_THICKNESS")),
     draw_rule_of_thirds: bool = False,
     draw_crosshair: bool = False,
     capture_cells: bool = False
@@ -80,7 +82,7 @@ class DetectorRT:
     self.fps = fps
     self.window_title = window_title
     self.draw_axes = draw_axes
-    self.min_brightness = 2.0 # brightness threshold: Require frames to have mean brightness > 2.0 before accepting camera open
+    self.min_brightness =  int(os.getenv("BRIGHTNESS_VALUE")) # brightness threshold: Require frames to have mean brightness > 2.0 before accepting camera open
     self.allowed_ids = set(allowed_ids) if allowed_ids is not None else None
     self.capture_cells = capture_cells
 
@@ -101,8 +103,8 @@ class DetectorRT:
     # State
     self.cap = None
     self._fps_prev = time.time()
-    self._fps_counter = 0
-    self._fps_display = 0.0
+    self._fps_counter = int(value) if (value := os.getenv("FPS_COUNTER")) is not None else 0
+    self._fps_display = float(value) if (value := os.getenv("FPS_DISPLAY")) is not None else 0.0
     self.last_results: Dict[str, Any] = {}
 
     self.draw_grid = draw_grid
