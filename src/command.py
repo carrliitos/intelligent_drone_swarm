@@ -54,8 +54,8 @@ class Command:
     self._l_was_down = False      # for 'L' edge detection
     self._g_was_down = False      # for 'G' edge detection (enter manual)
     self._s_was_down = False      # for 'S' edge (enter swarm manual)
-    self.speed_xy = 0.50          # m/s
-    self.speed_z  = 0.50          # m/s
+    self.speed_xy = 1.0           # m/s
+    self.speed_z  = 1.0           # m/s
     self.yaw_rate = 90.0          # deg/s
     self.takeoff_alt = takeoff_alt # m
 
@@ -173,7 +173,7 @@ class Command:
           self.mc = MotionCommander(self.scf)
         # If already flying via another mode, this will raise; so only take_off if not flying
         try:
-          self.mc.take_off(self.takeoff_alt, velocity=0.4)
+          self.mc.take_off(self.takeoff_alt, velocity=1.0)
         except Exception as e:
           # Already flying? That's fine; continue.
           pass
@@ -409,6 +409,19 @@ class Command:
         pad_x, pad_y = 16, 12
         x, y = pad_x, info_y + pad_y
         clock = pygame.time.Clock()
+
+        try:
+          main_mod = sys.modules.get('main') or importlib.import_module('main')
+          with main_mod._latest_frame_lock:
+            ids_list = list(dict.fromkeys(getattr(main_mod, "_latest_ids", [])))
+          ids_list.sort()
+        except Exception:
+          ids_list = []
+
+        ids_text = "IDs: " + (", ".join(map(str, ids_list)) if ids_list else "—")
+        txt_ids = font.render(ids_text, True, (120, 200, 255))
+        screen.blit(txt_ids, (x, y))
+        y += txt_ids.get_height() + 10
 
         for line in instructions:
           txt = font.render(line, True, (230, 230, 230))

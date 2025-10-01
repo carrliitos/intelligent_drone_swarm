@@ -1,19 +1,42 @@
 from pathlib import Path
 import time
 import sys
-from typing import Optional, Tuple, Dict, Any, List
+from typing import Optional, Tuple, Dict, Any, List, Union
+from dotenv import load_dotenv
+load_dotenv(dotenv_path="config/.env") 
 
 import cv2
 import numpy as np
 import os
 import threading
+from contextlib import contextmanager
 
-from utils import logger, context
+from utils import logger, context, helpers
 
 directory = context.get_context(os.path.abspath(__file__))
 logger_file_name = Path(directory).stem
 logger_name = Path(__file__).stem
-logger = logger.setup_logger(logger_name, f"{directory}/logs/{logger_file_name}.log")
+logger = logger.setup_logger(
+  logger_name=logger_name, 
+  log_file=f"{directory}/logs/{logger_file_name}.log", 
+  log_level=os.getenv("LOG_LEVEL")
+)
+
+@contextmanager
+def suppress_stderr():
+  """
+  Temporarily silence libjpeg MJPG warnings written to stderr during cap.read().
+  Keep the scope as small as possible since this is process-wide.
+  """
+  fd = sys.stderr.fileno()
+  saved = os.dup(fd)
+  try:
+    with open(os.devnull, "w") as devnull:
+      os.dup2(devnull.fileno(), fd)
+    yield
+  finally:
+    os.dup2(saved, fd)
+    os.close(saved)
 
 class DetectorRT:
   """
@@ -24,55 +47,87 @@ class DetectorRT:
   _is_open = False
 
   _DICT_NAME_TO_ENUM = {
-    "4x4_50":   cv2.aruco.DICT_4X4_50,
-    "4x4_100":  cv2.aruco.DICT_4X4_100,
-    "4x4_250":  cv2.aruco.DICT_4X4_250,
-    "4x4_1000": cv2.aruco.DICT_4X4_1000
+    "DICT_4X4_50":   cv2.aruco.DICT_4X4_50,
+    "DICT_4X4_100":  cv2.aruco.DICT_4X4_100,
+    "DICT_4X4_250":  cv2.aruco.DICT_4X4_250,
+    "DICT_4X4_1000": cv2.aruco.DICT_4X4_1000
   }
 
   def __init__(
     self,
-    dictionary: str = "4x4_1000",
-    camera: int = 2, # USB-connected camera
-    width: int = 640,
-    height: int = 480,
-    fps: int = 30,
+    dictionary: Optional[str] = None,
+    camera: Optional[Union[int, str]] = None,
+    width: Optional[Union[int, str]] = None,
+    height: Optional[Union[int, str]] = None,
+    fps: Optional[Union[int, str]] = None,
     calib_path: Optional[str] = None,
-    marker_length_m: Optional[float] = None,
-    window_title: str = "Intelligent Drone Swarm",
+    marker_length_m: Optional[Union[float, str]] = None,
+    window_title: Optional[str] = None,
     draw_axes: bool = True,
+    allowed_ids: Optional[Union[List[int], List[str], str]] = None,
     # Draw grid
     draw_grid: bool = True,
-    grid_step_px: int = 40,
-    grid_color: Tuple[int, int, int] = (60, 220, 60),
-    grid_thickness: int = 1,
+    min_brightness: Optional[Union[int, float, str]] = None,
+    grid_step_px: Optional[Union[int, str]] = None,
+    grid_color: Optional[Union[str, Tuple[int, int, int], List[int]]] = None,
+    grid_thickness: Optional[Union[int, str]] = None,
     draw_rule_of_thirds: bool = False,
-    draw_crosshair: bool = False
+    draw_crosshair: bool = False,
+    capture_cells: bool = False,
+    # State knobs (let caller pass)
+    fps_counter: Optional[Union[int, str]] = None,
+    fps_display: Optional[Union[int, float, str]] = None
   ):
-    self.dictionary_name = dictionary
-    if dictionary not in self._DICT_NAME_TO_ENUM:
-      raise ValueError(f"Unsupported dictionary: '{dictionary}'. "
-                       f"Choose one of: {list(self._DICT_NAME_TO_ENUM.keys())}")
+    # dictionary
+    raw_dict = dictionary or "4x4_1000"
+    self.dictionary_name = helpers._normalize_dict_name(raw_dict)
 
-    self.dict_enum = self._DICT_NAME_TO_ENUM[dictionary]
-    self.camera_index = camera
-    self.width = width
-    self.height = height
-    self.fps = fps
-    self.window_title = window_title
-    self.draw_axes = draw_axes
-    self.min_brightness = 2.0 # brightness threshold: Require frames to have mean brightness > 2.0 before accepting camera open
+    # camera index
+    cam_idx = helpers._to_int(camera, default=0)
+    if cam_idx is None:
+      cam_idx = 0
+    self.camera_index = cam_idx
 
-    # Pose estimation stuff
-    self.marker_length_m = marker_length_m
+    # image settings (None means "do not force-set"; set only if not None)
+    self.width = helpers._to_int(width, default=None)
+    self.height = helpers._to_int(height, default=None)
+    self.fps = helpers._to_int(fps, default=None)
+
+    self.window_title = window_title or "ArUco Detector"
+    self.draw_axes = bool(draw_axes)
+
+    ids = helpers._to_ids(allowed_ids)
+    self.allowed_ids = set(ids) if ids else None
+
+    self.capture_cells = bool(capture_cells)
+
+    # thresholds & counters
+    self.min_brightness = helpers._to_float(min_brightness, default=2.0)
+    self._fps_counter = helpers._to_int(fps_counter, default=0) or 0
+    self._fps_display = helpers._to_float(fps_display, default=0.0) or 0.0
+
+    # grid defaults
+    self.draw_grid = bool(draw_grid)
+    self.grid_step_px = helpers._to_int(grid_step_px, default=50) or 50
+    self.grid_color = helpers._to_bgr_tuple(grid_color, default=(0, 255, 0))  # BGR
+    self.grid_thickness = helpers._to_int(grid_thickness, default=1) or 1
+    self.draw_rule_of_thirds = bool(draw_rule_of_thirds)
+    self.draw_crosshair = bool(draw_crosshair)
+
+    # Pose estimation
+    self.marker_length_m = helpers._to_float(marker_length_m, default=None)
     self.camera_matrix = None
     self.dist_coeffs = None
     self._do_pose = False
-    if calib_path is not None and marker_length_m is not None:
-      self.camera_matrix, self.dist_coeffs = self._load_calibration(calib_path)
+    if calib_path is not None and self.marker_length_m is not None:
+      self.camera_matrix, self.dist_coeffs = helpers._load_calibration(calib_path)
       self._do_pose = True
 
-    # OpenCV ArUco
+    # OpenCV ArUco Setup
+    if self.dictionary_name not in self._DICT_NAME_TO_ENUM:
+      raise ValueError(f"Unsupported dictionary: '{raw_dict}'. "
+                       f"Choose one of: {list(self._DICT_NAME_TO_ENUM.keys())}")
+    self.dict_enum = self._DICT_NAME_TO_ENUM[self.dictionary_name]
     self.aruco_dict = cv2.aruco.getPredefinedDictionary(self.dict_enum)
     self.params = cv2.aruco.DetectorParameters()
     self.detector = cv2.aruco.ArucoDetector(self.aruco_dict, self.params)
@@ -80,26 +135,16 @@ class DetectorRT:
     # State
     self.cap = None
     self._fps_prev = time.time()
-    self._fps_counter = 0
-    self._fps_display = 0.0
     self.last_results: Dict[str, Any] = {}
 
-    self.draw_grid = draw_grid
-    self.grid_step_px = grid_step_px
-    self.grid_color = grid_color
-    self.grid_thickness = grid_thickness
-    self.draw_rule_of_thirds = draw_rule_of_thirds
-    self.draw_crosshair = draw_crosshair
-
-    # Occupy grid for the detected ArUco marker
+    # Occupied-grid overlay
     self.highlight_occupied: bool = True
-    self.occupied_color: Tuple[int, int, int] = (40, 40, 200) # BGR (red-ish(?))
-    self.occupied_alpha: float = 0.75                         # 0..1 fill opacity
-    self._occupied_cells = set()                              # A set of {(row, col), ...}
+    self.occupied_color: Tuple[int, int, int] = (40, 40, 200)  # BGR
+    self.occupied_alpha: float = 0.75
+    self._occupied_cells = set()
 
-    # internal lock so any thread that calls read() does so one-at-a-time.
+    # Locks
     self._cap_lock = threading.Lock()
-    
     self._latest_frame = None
     self._latest_lock = threading.Lock()
 
@@ -191,9 +236,11 @@ class DetectorRT:
         return cap
 
       attempts = [
-        (self.width, self.height, self.fps, 'MJPG'), # requested (e.g., 1920x1080@30 MJPG)
-        (1280, 720, 30, 'MJPG'),                     # C920 safe profile
-        (640, 480, 30, None),                        # fallback (i think i got YUYV?)
+        (self.width, self.height, self.fps, 'MJPG'), # requested (1280x720@30 MJPG)
+        (1280, 720, 30, 'MJPG'),                     # UVC default profile
+        (640, 480, 30, 'MJPG'),                      # lower-res MJPG (keeps JPEG decode path)
+        (640, 480, 30, None),                        # fallback
+        (640, 480, 30, 'YUYV'),                      # uncompressed fallback (full FPS at VGA)
       ]
 
       self.cap = None
@@ -206,7 +253,8 @@ class DetectorRT:
         # Warm-up + “not black” check
         ok_count, t0 = 0, time.time()
         while time.time() - t0 < 2.0:
-          ok, frm = cap.read()
+          with suppress_stderr():
+            ok, frm = cap.read()
           if ok and frm is not None and frm.mean() > self.min_brightness:
             ok_count += 1
             if ok_count >= 3:
@@ -272,14 +320,16 @@ class DetectorRT:
       raise RuntimeError("Call open() before read().")
 
     with self._cap_lock:
-      ok, frame = self.cap.read()
+      with suppress_stderr():
+        ok, frame = self.cap.read()
     if not ok or frame is None:
       logger.warning("Camera read failed; attempting one-shot reopen…")
       try:
         self.release()
         self.open()
         with self._cap_lock:
-          ok, frame = self.cap.read()
+          with suppress_stderr():
+            ok, frame = self.cap.read()
       except Exception as e:
         logger.error(f"Reopen failed: {e}")
         return None, {}
@@ -287,10 +337,12 @@ class DetectorRT:
         return None, {}
 
     corners, ids, _ = self.detector.detectMarkers(frame)
+    corners, ids = helpers._filter_known(corners, ids, self.allowed_ids)
     rvecs = tvecs = None
     dists: List[float] = []
-    # Reset the occupied cells per frame
-    self._occupied_cells = set()
+    if not self.capture_cells:
+      # Reset the occupied cells per frame
+      self._occupied_cells = set()
 
     if ids is not None and len(ids) > 0:
       # Draw the detected boundaries and their IDs
@@ -363,9 +415,12 @@ class DetectorRT:
     in-place with overlays.
     """
     corners, ids, _ = self.detector.detectMarkers(frame)
+    corners, ids = helpers._filter_known(corners, ids, self.allowed_ids)
     rvecs = tvecs = None
     dists: List[float] = []
-    self._occupied_cells = set()
+    if not self.capture_cells:
+      # Reset the occupied cells per frame
+      self._occupied_cells = set()
 
     if ids is not None and len(ids) > 0:
       cv2.aruco.drawDetectedMarkers(frame, corners, ids)
@@ -403,14 +458,6 @@ class DetectorRT:
       "tvecs": tvecs,
       "dist_m": dists,
     }
-
-  @staticmethod
-  def _load_calibration(npz_path: str):
-    calib_p = Path(npz_path)
-    if not calib_p.exists():
-      raise FileNotFoundError(f"Calibration file not found: {calib_p}")
-    data = np.load(str(calib_p))
-    return data["camera_matrix"], data["dist_coeffs"]
 
 def primary_target(results, frame_shape):
   """
