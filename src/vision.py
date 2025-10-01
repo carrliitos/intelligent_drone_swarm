@@ -11,7 +11,7 @@ import os
 import threading
 from contextlib import contextmanager
 
-from utils import logger, context
+from utils import logger, context, helpers
 
 directory = context.get_context(os.path.abspath(__file__))
 logger_file_name = Path(directory).stem
@@ -53,67 +53,6 @@ class DetectorRT:
     "DICT_4X4_1000": cv2.aruco.DICT_4X4_1000
   }
 
-  @staticmethod
-  def _to_int(val: Optional[Union[str, int]], default: Optional[int] = None) -> Optional[int]:
-    try:
-      if val is None: return default
-      return int(val)
-    except (ValueError, TypeError):
-      return default
-
-  @staticmethod
-  def _to_float(val: Optional[Union[str, float]], default: Optional[float] = None) -> Optional[float]:
-    try:
-      if val is None: return default
-      return float(val)
-    except (ValueError, TypeError):
-      return default
-
-  @staticmethod
-  def _to_bgr_tuple(val: Optional[Union[str, Tuple[int,int,int], List[int]]], default: Tuple[int,int,int] = (0,255,0)) -> Tuple[int,int,int]:
-    try:
-      if val is None:
-        return default
-      if isinstance(val, str):
-        parts = [int(x.strip()) for x in val.split(",")]
-        if len(parts) == 3:
-          return (parts[0], parts[1], parts[2])
-        return default
-      if isinstance(val, (list, tuple)) and len(val) == 3:
-        return (int(val[0]), int(val[1]), int(val[2]))
-      return default
-    except Exception:
-      return default
-
-  @staticmethod
-  def _to_ids(val: Optional[Union[str, List[int], List[str]]]) -> Optional[List[int]]:
-    if val is None:
-      return None
-    if isinstance(val, list):
-      out = []
-      for v in val:
-        try: out.append(int(v))
-        except Exception: pass
-      return out or None
-    if isinstance(val, str):
-      parts = [p.strip() for p in val.split(",") if p.strip() != ""]
-      out = []
-      for p in parts:
-        try: out.append(int(p))
-        except Exception: pass
-      return out or None
-    return None
-
-  @staticmethod
-  def _normalize_dict_name(name: str) -> str:
-    """
-    Accept variants like '4x4_1000', 'DICT_4X4_1000', '4X4_1000' and normalize to 'DICT_4X4_1000'.
-    """
-    s = name.strip().upper()
-    if not s.startswith("DICT_"):
-      s = "DICT_" + s
-    return s
-
   def __init__(
     self,
     dictionary: Optional[str] = None,
@@ -141,47 +80,47 @@ class DetectorRT:
   ):
     # dictionary
     raw_dict = dictionary or "4x4_1000"
-    self.dictionary_name = self._normalize_dict_name(raw_dict)
+    self.dictionary_name = helpers._normalize_dict_name(raw_dict)
 
     # camera index
-    cam_idx = self._to_int(camera, default=0)
+    cam_idx = helpers._to_int(camera, default=0)
     if cam_idx is None:
       cam_idx = 0
     self.camera_index = cam_idx
 
     # image settings (None means "do not force-set"; set only if not None)
-    self.width = self._to_int(width, default=None)
-    self.height = self._to_int(height, default=None)
-    self.fps = self._to_int(fps, default=None)
+    self.width = helpers._to_int(width, default=None)
+    self.height = helpers._to_int(height, default=None)
+    self.fps = helpers._to_int(fps, default=None)
 
     self.window_title = window_title or "ArUco Detector"
     self.draw_axes = bool(draw_axes)
 
-    ids = self._to_ids(allowed_ids)
+    ids = helpers._to_ids(allowed_ids)
     self.allowed_ids = set(ids) if ids else None
 
     self.capture_cells = bool(capture_cells)
 
     # thresholds & counters
-    self.min_brightness = self._to_float(min_brightness, default=2.0)
-    self._fps_counter = self._to_int(fps_counter, default=0) or 0
-    self._fps_display = self._to_float(fps_display, default=0.0) or 0.0
+    self.min_brightness = helpers._to_float(min_brightness, default=2.0)
+    self._fps_counter = helpers._to_int(fps_counter, default=0) or 0
+    self._fps_display = helpers._to_float(fps_display, default=0.0) or 0.0
 
     # grid defaults
     self.draw_grid = bool(draw_grid)
-    self.grid_step_px = self._to_int(grid_step_px, default=50) or 50
-    self.grid_color = self._to_bgr_tuple(grid_color, default=(0, 255, 0))  # BGR
-    self.grid_thickness = self._to_int(grid_thickness, default=1) or 1
+    self.grid_step_px = helpers._to_int(grid_step_px, default=50) or 50
+    self.grid_color = helpers._to_bgr_tuple(grid_color, default=(0, 255, 0))  # BGR
+    self.grid_thickness = helpers._to_int(grid_thickness, default=1) or 1
     self.draw_rule_of_thirds = bool(draw_rule_of_thirds)
     self.draw_crosshair = bool(draw_crosshair)
 
     # Pose estimation
-    self.marker_length_m = self._to_float(marker_length_m, default=None)
+    self.marker_length_m = helpers._to_float(marker_length_m, default=None)
     self.camera_matrix = None
     self.dist_coeffs = None
     self._do_pose = False
     if calib_path is not None and self.marker_length_m is not None:
-      self.camera_matrix, self.dist_coeffs = self._load_calibration(calib_path)
+      self.camera_matrix, self.dist_coeffs = helpers._load_calibration(calib_path)
       self._do_pose = True
 
     # OpenCV ArUco Setup
@@ -398,7 +337,7 @@ class DetectorRT:
         return None, {}
 
     corners, ids, _ = self.detector.detectMarkers(frame)
-    corners, ids = self._filter_known(corners, ids, self.allowed_ids)
+    corners, ids = helpers._filter_known(corners, ids, self.allowed_ids)
     rvecs = tvecs = None
     dists: List[float] = []
     if not self.capture_cells:
@@ -476,7 +415,7 @@ class DetectorRT:
     in-place with overlays.
     """
     corners, ids, _ = self.detector.detectMarkers(frame)
-    corners, ids = self._filter_known(corners, ids, self.allowed_ids)
+    corners, ids = helpers._filter_known(corners, ids, self.allowed_ids)
     rvecs = tvecs = None
     dists: List[float] = []
     if not self.capture_cells:
@@ -519,34 +458,6 @@ class DetectorRT:
       "tvecs": tvecs,
       "dist_m": dists,
     }
-
-  @staticmethod
-  def _load_calibration(npz_path: str):
-    calib_p = Path(npz_path)
-    if not calib_p.exists():
-      raise FileNotFoundError(f"Calibration file not found: {calib_p}")
-    data = np.load(str(calib_p))
-    return data["camera_matrix"], data["dist_coeffs"]
-
-  @staticmethod
-  def _filter_known(corners, ids, allowed: Optional[set]):
-    """
-    Keep only markers whose ID is in 'allowed'. Preserves correspondence between
-    corners[i] and ids[i]. Returns (corners_filt, ids_filt or None).
-    """
-    if ids is None or len(ids) == 0 or allowed is None:
-      return corners, ids
-    keep_corners = []
-    keep_ids = []
-    # ids is shape (N,1); flatten to iterate
-    for corner, mid in zip(corners, ids.flatten()):
-      if mid in allowed:
-        keep_corners.append(corner)
-        keep_ids.append(mid)
-    if not keep_ids:
-      return [], None
-    ids_out = np.array(keep_ids, dtype=np.int32).reshape(-1, 1)
-    return keep_corners, ids_out
 
 def primary_target(results, frame_shape):
   """
