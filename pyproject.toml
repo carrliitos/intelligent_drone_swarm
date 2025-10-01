@@ -8,6 +8,8 @@ version = "2.4.0"
 requires-python = ">=3.10"
 dependencies = [
   "cflib",
+  "dotenv",
+  "python-dotenv",
   "importlib_resources",
   "libusb-package",
   "numpy",
