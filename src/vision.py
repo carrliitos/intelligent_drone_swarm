@@ -1,8 +1,9 @@
 from pathlib import Path
 import time
 import sys
-from typing import Optional, Tuple, Dict, Any, List
+from typing import Optional, Tuple, Dict, Any, List, Union
 from dotenv import load_dotenv
+load_dotenv(dotenv_path="config/.env") 
 
 import cv2
 import numpy as np
@@ -15,8 +16,11 @@ from utils import logger, context
 directory = context.get_context(os.path.abspath(__file__))
 logger_file_name = Path(directory).stem
 logger_name = Path(__file__).stem
-logger = logger.setup_logger(logger_name, f"{directory}/logs/{logger_file_name}.log")
-load_dotenv(dotenv_path="config/.env") 
+logger = logger.setup_logger(
+  logger_name=logger_name, 
+  log_file=f"{directory}/logs/{logger_file_name}.log", 
+  log_level=os.getenv("LOG_LEVEL")
+)
 
 @contextmanager
 def suppress_stderr():
@@ -43,59 +47,148 @@ class DetectorRT:
   _is_open = False
 
   _DICT_NAME_TO_ENUM = {
-    "4x4_50":   cv2.aruco.DICT_4X4_50,
-    "4x4_100":  cv2.aruco.DICT_4X4_100,
-    "4x4_250":  cv2.aruco.DICT_4X4_250,
-    "4x4_1000": cv2.aruco.DICT_4X4_1000
+    "DICT_4X4_50":   cv2.aruco.DICT_4X4_50,
+    "DICT_4X4_100":  cv2.aruco.DICT_4X4_100,
+    "DICT_4X4_250":  cv2.aruco.DICT_4X4_250,
+    "DICT_4X4_1000": cv2.aruco.DICT_4X4_1000
   }
+
+  @staticmethod
+  def _to_int(val: Optional[Union[str, int]], default: Optional[int] = None) -> Optional[int]:
+    try:
+      if val is None: return default
+      return int(val)
+    except (ValueError, TypeError):
+      return default
+
+  @staticmethod
+  def _to_float(val: Optional[Union[str, float]], default: Optional[float] = None) -> Optional[float]:
+    try:
+      if val is None: return default
+      return float(val)
+    except (ValueError, TypeError):
+      return default
+
+  @staticmethod
+  def _to_bgr_tuple(val: Optional[Union[str, Tuple[int,int,int], List[int]]], default: Tuple[int,int,int] = (0,255,0)) -> Tuple[int,int,int]:
+    try:
+      if val is None:
+        return default
+      if isinstance(val, str):
+        parts = [int(x.strip()) for x in val.split(",")]
+        if len(parts) == 3:
+          return (parts[0], parts[1], parts[2])
+        return default
+      if isinstance(val, (list, tuple)) and len(val) == 3:
+        return (int(val[0]), int(val[1]), int(val[2]))
+      return default
+    except Exception:
+      return default
+
+  @staticmethod
+  def _to_ids(val: Optional[Union[str, List[int], List[str]]]) -> Optional[List[int]]:
+    if val is None:
+      return None
+    if isinstance(val, list):
+      out = []
+      for v in val:
+        try: out.append(int(v))
+        except Exception: pass
+      return out or None
+    if isinstance(val, str):
+      parts = [p.strip() for p in val.split(",") if p.strip() != ""]
+      out = []
+      for p in parts:
+        try: out.append(int(p))
+        except Exception: pass
+      return out or None
+    return None
+
+  @staticmethod
+  def _normalize_dict_name(name: str) -> str:
+    """
+    Accept variants like '4x4_1000', 'DICT_4X4_1000', '4X4_1000' and normalize to 'DICT_4X4_1000'.
+    """
+    s = name.strip().upper()
+    if not s.startswith("DICT_"):
+      s = "DICT_" + s
+    return s
 
   def __init__(
     self,
-    dictionary = str(os.getenv("ARUCO_DICTIONARY")),
-    camera = int(os.getenv("CAMERA_CONNECTION")), # USB-connected camera
-    width = int(os.getenv("CAMERA_WIDTH")),
-    height = int(os.getenv("CAMERA_HEIGHT")),
-    fps = int(os.getenv("CAMERA_FPS")),
+    dictionary: Optional[str] = None,
+    camera: Optional[Union[int, str]] = None,
+    width: Optional[Union[int, str]] = None,
+    height: Optional[Union[int, str]] = None,
+    fps: Optional[Union[int, str]] = None,
     calib_path: Optional[str] = None,
-    marker_length_m: Optional[float] = None,
-    window_title = str(os.getenv("WINDOW_TITLE")),
+    marker_length_m: Optional[Union[float, str]] = None,
+    window_title: Optional[str] = None,
     draw_axes: bool = True,
-    allowed_ids: Optional[List[int]] = None,
+    allowed_ids: Optional[Union[List[int], List[str], str]] = None,
     # Draw grid
     draw_grid: bool = True,
-    grid_step_px = int(os.getenv("GRID_STEP_PX")),
-    grid_color = tuple(map(int, os.getenv("GRID_COLOR").split(","))),
-    grid_thickness = int(os.getenv("GRID_THICKNESS")),
+    min_brightness: Optional[Union[int, float, str]] = None,
+    grid_step_px: Optional[Union[int, str]] = None,
+    grid_color: Optional[Union[str, Tuple[int, int, int], List[int]]] = None,
+    grid_thickness: Optional[Union[int, str]] = None,
     draw_rule_of_thirds: bool = False,
     draw_crosshair: bool = False,
-    capture_cells: bool = False
+    capture_cells: bool = False,
+    # State knobs (let caller pass)
+    fps_counter: Optional[Union[int, str]] = None,
+    fps_display: Optional[Union[int, float, str]] = None
   ):
-    self.dictionary_name = dictionary
-    if dictionary not in self._DICT_NAME_TO_ENUM:
-      raise ValueError(f"Unsupported dictionary: '{dictionary}'. "
-                       f"Choose one of: {list(self._DICT_NAME_TO_ENUM.keys())}")
+    # dictionary
+    raw_dict = dictionary or "4x4_1000"
+    self.dictionary_name = self._normalize_dict_name(raw_dict)
 
-    self.dict_enum = self._DICT_NAME_TO_ENUM[dictionary]
-    self.camera_index = camera
-    self.width = width
-    self.height = height
-    self.fps = fps
-    self.window_title = window_title
-    self.draw_axes = draw_axes
-    self.min_brightness =  int(os.getenv("BRIGHTNESS_VALUE")) # brightness threshold: Require frames to have mean brightness > 2.0 before accepting camera open
-    self.allowed_ids = set(allowed_ids) if allowed_ids is not None else None
-    self.capture_cells = capture_cells
+    # camera index
+    cam_idx = self._to_int(camera, default=0)
+    if cam_idx is None:
+      cam_idx = 0
+    self.camera_index = cam_idx
 
-    # Pose estimation stuff
-    self.marker_length_m = marker_length_m
+    # image settings (None means "do not force-set"; set only if not None)
+    self.width = self._to_int(width, default=None)
+    self.height = self._to_int(height, default=None)
+    self.fps = self._to_int(fps, default=None)
+
+    self.window_title = window_title or "ArUco Detector"
+    self.draw_axes = bool(draw_axes)
+
+    ids = self._to_ids(allowed_ids)
+    self.allowed_ids = set(ids) if ids else None
+
+    self.capture_cells = bool(capture_cells)
+
+    # thresholds & counters
+    self.min_brightness = self._to_float(min_brightness, default=2.0)
+    self._fps_counter = self._to_int(fps_counter, default=0) or 0
+    self._fps_display = self._to_float(fps_display, default=0.0) or 0.0
+
+    # grid defaults
+    self.draw_grid = bool(draw_grid)
+    self.grid_step_px = self._to_int(grid_step_px, default=50) or 50
+    self.grid_color = self._to_bgr_tuple(grid_color, default=(0, 255, 0))  # BGR
+    self.grid_thickness = self._to_int(grid_thickness, default=1) or 1
+    self.draw_rule_of_thirds = bool(draw_rule_of_thirds)
+    self.draw_crosshair = bool(draw_crosshair)
+
+    # Pose estimation
+    self.marker_length_m = self._to_float(marker_length_m, default=None)
     self.camera_matrix = None
     self.dist_coeffs = None
     self._do_pose = False
-    if calib_path is not None and marker_length_m is not None:
+    if calib_path is not None and self.marker_length_m is not None:
       self.camera_matrix, self.dist_coeffs = self._load_calibration(calib_path)
       self._do_pose = True
 
-    # OpenCV ArUco
+    # OpenCV ArUco Setup
+    if self.dictionary_name not in self._DICT_NAME_TO_ENUM:
+      raise ValueError(f"Unsupported dictionary: '{raw_dict}'. "
+                       f"Choose one of: {list(self._DICT_NAME_TO_ENUM.keys())}")
+    self.dict_enum = self._DICT_NAME_TO_ENUM[self.dictionary_name]
     self.aruco_dict = cv2.aruco.getPredefinedDictionary(self.dict_enum)
     self.params = cv2.aruco.DetectorParameters()
     self.detector = cv2.aruco.ArucoDetector(self.aruco_dict, self.params)
@@ -103,26 +196,16 @@ class DetectorRT:
     # State
     self.cap = None
     self._fps_prev = time.time()
-    self._fps_counter = int(value) if (value := os.getenv("FPS_COUNTER")) is not None else 0
-    self._fps_display = float(value) if (value := os.getenv("FPS_DISPLAY")) is not None else 0.0
     self.last_results: Dict[str, Any] = {}
 
-    self.draw_grid = draw_grid
-    self.grid_step_px = grid_step_px
-    self.grid_color = grid_color
-    self.grid_thickness = grid_thickness
-    self.draw_rule_of_thirds = draw_rule_of_thirds
-    self.draw_crosshair = draw_crosshair
-
-    # Occupy grid for the detected ArUco marker
+    # Occupied-grid overlay
     self.highlight_occupied: bool = True
-    self.occupied_color: Tuple[int, int, int] = (40, 40, 200) # BGR (red-ish(?))
-    self.occupied_alpha: float = 0.75                         # 0..1 fill opacity
-    self._occupied_cells = set()                              # A set of {(row, col), ...}
+    self.occupied_color: Tuple[int, int, int] = (40, 40, 200)  # BGR
+    self.occupied_alpha: float = 0.75
+    self._occupied_cells = set()
 
-    # internal lock so any thread that calls read() does so one-at-a-time.
+    # Locks
     self._cap_lock = threading.Lock()
-    
     self._latest_frame = None
     self._latest_lock = threading.Lock()
 

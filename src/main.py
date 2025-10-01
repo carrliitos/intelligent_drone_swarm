@@ -9,9 +9,12 @@ import time
 import threading
 import cv2
 from pathlib import Path
+from dotenv import load_dotenv
+load_dotenv(dotenv_path="config/.env") 
 
 from utils import logger
 from utils import context
+from utils import helpers
 from drone_connection import DroneConnection
 from command import Command
 from command import SwarmCommand
@@ -24,15 +27,17 @@ directory = context.get_context(os.path.abspath(__file__))
 logger_file_name = Path(directory).stem
 logger_name = Path(__file__).stem
 logger_file = f"{directory}/logs/{logger_file_name}.log"
-logger = logger.setup_logger(logger_name, logger_file)
+logger = logger.setup_logger(
+  logger_name=logger_name, 
+  log_file=logger_file, 
+  log_level=os.getenv("LOG_LEVEL")
+)
 
-calibration_path = f"{directory}/src/utils/calibration_imgs/cam_param.npz"
-
-UDP = "udp://192.168.43.51:2390"
+UDP = os.getenv("UDP")
 RADIO_CHANNELS = {
-  "7": "radio://0/80/2M/E7E7E7E7E7",
-  "8": "radio://0/80/2M/E7E7E7E7E8",
-  "9": "radio://0/80/2M/E7E7E7E7E9"
+  "7": os.getenv("RADIO_CHANNEL_7"),
+  "8": os.getenv("RADIO_CHANNEL_8"),
+  "9": os.getenv("RADIO_CHANNEL_9")
 }
 
 _latest_frame_lock = threading.Lock()
@@ -66,20 +71,26 @@ def run(connection_type, use_vision=False, use_control=False, swarm_uris=None):
     if use_vision:
       logger.info("==========Connecting to OpenCV==========")
       detector = DetectorRT(
-        dictionary="4x4_1000",
-        camera=2,
-        calib_path=calibration_path,
-        marker_length_m=0.025,
-        width=1920, 
-        height=1080, 
-        fps=30,
-        draw_axes=True,
-        allowed_ids=[249],
-        # Draw grid
-        draw_grid=True,
-        grid_step_px=60,
-        draw_rule_of_thirds=False,
-        draw_crosshair=False
+        dictionary=os.getenv("ARUCO_DICTIONARY"),
+        camera=helpers._i(os.getenv("CAMERA_CONNECTION")),
+        width=helpers._i(os.getenv("CAMERA_WIDTH")),
+        height=helpers._i(os.getenv("CAMERA_HEIGHT")),
+        fps=helpers._i(os.getenv("CAMERA_FPS")),
+        calib_path=os.getenv("CALIB_PATH"),
+        marker_length_m=helpers._f(os.getenv("MARKER_LENGTH_M")),
+        window_title=os.getenv("WINDOW_TITLE"),
+        draw_axes=helpers._b(os.getenv("DRAW_AXES")), 
+        allowed_ids=helpers._ids(os.getenv("ALLOWED_IDS")),
+        draw_grid=helpers._b(os.getenv("DRAW_GRID")), 
+        min_brightness=helpers._f(os.getenv("BRIGHTNESS_VALUE")), 
+        grid_step_px=helpers._i(os.getenv("GRID_STEP_PX")),
+        grid_color=os.getenv("GRID_COLOR"),
+        grid_thickness=helpers._i(os.getenv("GRID_THICKNESS")),
+        draw_rule_of_thirds=helpers._b(os.getenv("DRAW_RULE_OF_THIRDS")),
+        draw_crosshair=helpers._b(os.getenv("DRAW_CROSSHAIR")),
+        capture_cells=helpers._b(os.getenv("CAPTURE_CELLS")),
+        fps_counter=helpers._i(os.getenv("FPS_COUNTER")),
+        fps_display=helpers._f(os.getenv("FPS_DISPLAY"))
       )
       detector.open()
 
