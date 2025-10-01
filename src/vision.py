@@ -67,7 +67,8 @@ class DetectorRT:
     grid_color = tuple(map(int, os.getenv("GRID_COLOR").split(","))),
     grid_thickness = int(os.getenv("GRID_THICKNESS")),
     draw_rule_of_thirds: bool = False,
-    draw_crosshair: bool = False
+    draw_crosshair: bool = False,
+    capture_cells: bool = False
   ):
     self.dictionary_name = dictionary
     if dictionary not in self._DICT_NAME_TO_ENUM:
@@ -83,6 +84,7 @@ class DetectorRT:
     self.draw_axes = draw_axes
     self.min_brightness =  int(os.getenv("BRIGHTNESS_VALUE")) # brightness threshold: Require frames to have mean brightness > 2.0 before accepting camera open
     self.allowed_ids = set(allowed_ids) if allowed_ids is not None else None
+    self.capture_cells = capture_cells
 
     # Pose estimation stuff
     self.marker_length_m = marker_length_m
@@ -316,8 +318,9 @@ class DetectorRT:
     corners, ids = self._filter_known(corners, ids, self.allowed_ids)
     rvecs = tvecs = None
     dists: List[float] = []
-    # Reset the occupied cells per frame
-    self._occupied_cells = set()
+    if not self.capture_cells:
+      # Reset the occupied cells per frame
+      self._occupied_cells = set()
 
     if ids is not None and len(ids) > 0:
       # Draw the detected boundaries and their IDs
@@ -393,7 +396,9 @@ class DetectorRT:
     corners, ids = self._filter_known(corners, ids, self.allowed_ids)
     rvecs = tvecs = None
     dists: List[float] = []
-    self._occupied_cells = set()
+    if not self.capture_cells:
+      # Reset the occupied cells per frame
+      self._occupied_cells = set()
 
     if ids is not None and len(ids) > 0:
       cv2.aruco.drawDetectedMarkers(frame, corners, ids)
