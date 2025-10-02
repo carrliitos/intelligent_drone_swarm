@@ -109,6 +109,22 @@ class SwarmCommand:
     scf.cf.platform.send_arming_request(True)
     time.sleep(0.5)
 
+  @staticmethod
+  def _light_check(self, delay=0.1):
+    logger.info("Light check!")
+    time.sleep(1.0)
+
+    GREEN = 138
+
+    for _ in range(20):
+      cf.param.set_value('led.bitmask', GREEN)
+      time.sleep(delay)
+      cf.param.set_value('led.bitmask', 0)
+      time.sleep(delay)
+
+    logger.info("Light check complete.")
+    time.sleep(1.0)
+
   def open(self):
     if self.swarm is not None:
       return
@@ -118,6 +134,7 @@ class SwarmCommand:
     cflib.crtp.init_drivers(enable_debug_driver=False)
     self.swarm = Swarm(self.uris, factory=self.factory)
     self.swarm.open_links()
+    self.swarm.parallel_safe(self._light_check)
 
     # Reset + param download + arm (in parallel)
     logger.info("Resetting estimators...")
