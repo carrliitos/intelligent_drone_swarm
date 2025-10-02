@@ -1,11 +1,24 @@
 import time
 from typing import Iterable, Dict
+from dotenv import load_dotenv
+load_dotenv(dotenv_path="config/.env") 
 
 import cflib.crtp
 from cflib.crazyflie.swarm import Swarm, CachedCfFactory
 from cflib.crazyflie.log import LogConfig
 from cflib.crazyflie.syncLogger import SyncLogger
 from cflib.positioning.motion_commander import MotionCommander
+
+from utils import logger, context
+
+directory = context.get_context(os.path.abspath(__file__))
+logger_file_name = Path(directory).stem
+logger_name = Path(__file__).stem
+logger = logger.setup_logger(
+  logger_name=logger_name, 
+  log_file=f"{directory}/logs/{logger_file_name}.log", 
+  log_level=os.getenv("LOG_LEVEL")
+)
 
 WINDOW = 10
 PERIOD_MS = 500
@@ -34,6 +47,8 @@ class SwarmCommand:
   @staticmethod
   def _wait_for_position_estimator(scf):
     cf = scf.cf
+    logger.info(f"{cf.link_uri}: Waiting for estimator to find position...")
+
     log_config = LogConfig(name='Kalman Variance', period_in_ms=PERIOD_MS)
     log_config.add_variable('kalman.varPX', 'float')
     log_config.add_variable('kalman.varPY', 'float')
@@ -57,9 +72,12 @@ class SwarmCommand:
         if ((max_x - min_x) < THRESHOLD and
             (max_y - min_y) < THRESHOLD and
             (max_z - min_z) < THRESHOLD):
+          logger.info(f"[{cf.link_uri}] Estimator stable in {time.time()-start:.2f}s")
           return True
 
         if time.time() - start > MAX_WAIT_SEC:
+          logger.warning(f"{cf.link_uri}: Estimator not stable by {MAX_WAIT_SEC}s "
+                         f"(Δx={max_x-min_x:.4f}, Δy={max_y-min_y:.4f}, Δz={max_z-min_z:.4f})")
           return False
 
   @staticmethod
@@ -69,14 +87,22 @@ class SwarmCommand:
     cf.param.set_value('stabilizer.controller', '1')  # PID
     cf.param.set_value('commander.enHighLevel', '1')  # HL commander
     try:
-      _ = cf.param.get_value('deck.bcFlow2')
+      flow = cf.param.get_value('deck.bcFlow2')
+      logger.info(f"{cf.link_uri}: Flow deck detected: {flow}")
     except Exception:
       pass
+
     cf.param.set_value('kalman.resetEstimation', '1')
     time.sleep(0.1)
     cf.param.set_value('kalman.resetEstimation', '0')
     time.sleep(0.4)
-    SwarmCommand._wait_for_position_estimator(scf)
+
+    ok = SwarmCommand._wait_for_position_estimator(scf)
+
+    if not ok:
+      logger.error("Estimators not stable. Exiting...")
+      time.sleep(1.0)
+      sys.exit()
 
   @staticmethod
   def _arm(scf):
@@ -87,16 +113,24 @@ class SwarmCommand:
     if self.swarm is not None:
       return
 
+    logger.info("In Swarm...")
+
     cflib.crtp.init_drivers(enable_debug_driver=False)
     self.swarm = Swarm(self.uris, factory=self.factory)
     self.swarm.open_links()
 
     # Reset + param download + arm (in parallel)
+    logger.info("Resetting estimators...")
     self.swarm.parallel_safe(self._reset_estimator)
+
+    logger.info("Waiting for swarm parameters to be downloaded...")
     self.swarm.parallel_safe(self._wait_for_param_download)
+
+    logger.info("Arming swarm...")
     self.swarm.parallel_safe(self._arm)
 
     # Create MotionCommander per drone
+    logger.info("Creating MotionCommander per drone...")
     for uri, scf in self.swarm._cfs.items():
       self.mcs[uri] = MotionCommander(scf)
 
