@@ -9,6 +9,8 @@ import numpy as np
 import importlib
 from pathlib import Path
 from collections import deque
+from dotenv import load_dotenv
+load_dotenv(dotenv_path="config/.env") 
 
 from cflib.crazyflie.log import LogConfig
 from cflib.crazyflie.syncLogger import SyncLogger
@@ -23,7 +25,11 @@ import vision
 directory = context.get_context(os.path.abspath(__file__))
 logger_file_name = Path(directory).stem
 logger_name = Path(__file__).stem
-logger = logger.setup_logger(logger_name, f"{directory}/logs/{logger_file_name}.log")
+logger = logger.setup_logger(
+  logger_name=logger_name, 
+  log_file=f"{directory}/logs/{logger_file_name}.log", 
+  log_level=os.getenv("LOG_LEVEL")
+)
 
 class Command:
   def __init__(self, 
