@@ -1,9 +1,10 @@
 from pathlib import Path
 import time
 import sys
+import logging
 from typing import Optional, Tuple, Dict, Any, List, Union
 from dotenv import load_dotenv
-load_dotenv(dotenv_path="config/.env") 
+load_dotenv(dotenv_path="config/.env")
 
 import cv2
 import numpy as np
@@ -17,10 +18,54 @@ directory = context.get_context(os.path.abspath(__file__))
 logger_file_name = Path(directory).stem
 logger_name = Path(__file__).stem
 logger = logger.setup_logger(
-  logger_name=logger_name, 
-  log_file=f"{directory}/logs/{logger_file_name}.log", 
+  logger_name=logger_name,
+  log_file=f"{directory}/logs/{logger_file_name}.log",
   log_level=os.getenv("LOG_LEVEL")
 )
+
+def _logfmt(event: str, level: int = logging.INFO, **kv):
+  """
+  Log a single-line event in logfmt style: event=foo k=v k2="v v" 
+  """
+  parts = [f"event={event}"]
+  for k, v in kv.items():
+    if isinstance(v, str):
+      if (" " in v) or ('"' in v):
+        v = '"' + v.replace('"', '\\"') + '"'
+    parts.append(f"{k}={v}")
+  logger.log(level, " ".join(parts))
+
+class _Timer:
+  """
+  Context manager to log an event's duration in ms.
+  """
+  def __init__(self, event: str, **kv):
+    self.event = event
+    self.kv = kv
+  def __enter__(self):
+    self.t0 = time.perf_counter()
+    return self
+  def __exit__(self, exc_type, exc, tb):
+    dt_ms = int((time.perf_counter() - self.t0) * 1000)
+    _logfmt(self.event, duration_ms=dt_ms, **self.kv)
+
+class _RateLimiter:
+  def __init__(self):
+    self._last = {}
+  def allow(self, key: str, every_sec: float = 5.0):
+    now = time.time()
+    last = self._last.get(key, 0.0)
+    if (now - last) >= every_sec:
+      self._last[key] = now
+      return True
+    return False
+
+_rate = _RateLimiter()
+
+# env-based tuning for sampled diagnostics and warning rate limits
+LOG_IDS_EVERY = helpers._to_int(os.getenv("LOG_IDS_EVERY"), 60) or 60
+LOG_FRAME_SAMPLE_EVERY = helpers._to_int(os.getenv("LOG_FRAME_SAMPLE_EVERY"), 60) or 60
+LOG_WARN_RATELIMIT = helpers._to_float(os.getenv("LOG_WARN_RATELIMIT"), 3.0) or 3.0
 
 @contextmanager
 def suppress_stderr():
@@ -28,15 +73,19 @@ def suppress_stderr():
   Temporarily silence libjpeg MJPG warnings written to stderr during cap.read().
   Keep the scope as small as possible since this is process-wide.
   """
-  fd = sys.stderr.fileno()
-  saved = os.dup(fd)
   try:
-    with open(os.devnull, "w") as devnull:
-      os.dup2(devnull.fileno(), fd)
-    yield
+    _logfmt("stderr_suppress_enter", level=logging.DEBUG)
+    fd = sys.stderr.fileno()
+    saved = os.dup(fd)
+    try:
+      with open(os.devnull, "w") as devnull:
+        os.dup2(devnull.fileno(), fd)
+      yield
+    finally:
+      os.dup2(saved, fd)
+      os.close(saved)
   finally:
-    os.dup2(saved, fd)
-    os.close(saved)
+    _logfmt("stderr_suppress_exit", level=logging.DEBUG)
 
 class DetectorRT:
   """
@@ -148,6 +197,31 @@ class DetectorRT:
     self._latest_frame = None
     self._latest_lock = threading.Lock()
 
+    # Session stats
+    self.stats = {
+      "frames": 0,
+      "detect_frames": 0,
+      "reopen_count": 0,
+      "read_failures": 0,
+      "ema_fps": 0.0
+    }
+    self._ema_alpha = 0.2  # EMA smoothing for FPS
+
+    # Init echo
+    _logfmt(
+      "detector_init",
+      dictionary=self.dictionary_name,
+      camera_index=self.camera_index,
+      req_width=self.width, req_height=self.height, req_fps=self.fps,
+      window_title=self.window_title,
+      draw_axes=self.draw_axes,
+      allowed_ids=("none" if self.allowed_ids is None else len(self.allowed_ids)),
+      draw_grid=self.draw_grid, grid_step=self.grid_step_px,
+      rule_of_thirds=self.draw_rule_of_thirds, crosshair=self.draw_crosshair,
+      min_brightness=self.min_brightness,
+      do_pose=self._do_pose, marker_len_m=self.marker_length_m
+    )
+
   def _point_to_cell(self, x: float, y: float, w: int, h: int):
     """
     Maps the pixel (x, y) to (row, col) in the grid.
@@ -162,7 +236,7 @@ class DetectorRT:
     Alpha-fill currently occupied cell and then draw the grid lines on top of it.
     """
     if not (self.draw_grid and self.highlight_occupied and self._occupied_cells):
-      self._overlay_grid(frame) # default to just drawing the grid and overlays and stuff
+      self._overlay_grid(frame)  # default to just drawing the grid and overlays
       return
 
     h, w = frame.shape[:2]
@@ -174,7 +248,7 @@ class DetectorRT:
       x0, y0 = col * step, row * step
       x1, y1 = min(x0 + step - 1, w - 1), min(y0 + step - 1, h - 1)
       cv2.rectangle(overlay, (x0, y0), (x1, y1), self.occupied_color, thickness=cv2.FILLED)
-    # Blend overaly to frame
+    # Blend overlay to frame
     cv2.addWeighted(overlay, self.occupied_alpha, frame, 1.0 - self.occupied_alpha, 0, frame)
 
     self._overlay_grid(frame)
@@ -191,7 +265,7 @@ class DetectorRT:
       for y in range(step, h, step):
         cv2.line(frame, (0, y), (w, y), self.grid_color, self.grid_thickness, cv2.LINE_AA)
 
-    # Rule of thirds: https://web.cecs.pdx.edu/~fliu/papers/ism2011.pdf
+    # Rule of thirds
     if self.draw_rule_of_thirds:
       x1, x2 = w // 3, (2 * w) // 3
       y1, y2 = h // 3, (2 * h) // 3
@@ -235,8 +309,10 @@ class DetectorRT:
         cap.set(cv2.CAP_PROP_AUTO_WB, 1)
         return cap
 
+      _logfmt("camera_open_begin", camera_index=self.camera_index)
+
       attempts = [
-        (self.width, self.height, self.fps, 'MJPG'), # requested (1280x720@30 MJPG)
+        (self.width, self.height, self.fps, 'MJPG'), # requested (e.g., 1280x720@30 MJPG)
         (1280, 720, 30, 'MJPG'),                     # UVC default profile
         (640, 480, 30, 'MJPG'),                      # lower-res MJPG (keeps JPEG decode path)
         (640, 480, 30, None),                        # fallback
@@ -244,10 +320,14 @@ class DetectorRT:
       ]
 
       self.cap = None
+      attempt_no = 0
 
       for (w, h, fps, fcc) in attempts:
+        attempt_no += 1
+        _logfmt("camera_try", attempt=attempt_no, width=w, height=h, fps=fps, fourcc=(fcc or "RAW"))
         cap = _try_open(w, h, fps, fcc)
         if cap is None:
+          _logfmt("camera_try_failed_open", attempt=attempt_no, reason="cap_not_open", level=logging.warning)
           continue
 
         # Warm-up + “not black” check
@@ -260,15 +340,19 @@ class DetectorRT:
             if ok_count >= 3:
               self.cap = cap
               self.width, self.height, self.fps = w, h, fps
+              _logfmt("camera_try_success", attempt=attempt_no, warmup_frames=ok_count)
               break
           time.sleep(0.01)
 
         if self.cap is not None:
           break
+
+        _logfmt("camera_try_failed_warmup", attempt=attempt_no, warmup_ok=ok_count, level=logging.WARNING)
         cap.release()
 
       if self.cap is None:
         logger.error("Could not open camera after multiple attempts.")
+        _logfmt("camera_open_failed", level=logging.ERROR)
         raise RuntimeError("Camera open failed.")
 
       got_w = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -277,6 +361,7 @@ class DetectorRT:
       fourcc = int(self.cap.get(cv2.CAP_PROP_FOURCC))
       fcc_text = "".join([chr((fourcc >> (8*i)) & 0xFF) for i in range(4)]).strip()
       logger.info(f"Camera opened at {got_w}x{got_h} @ {got_fps:.1f} FPS ({fcc_text or 'RAW'})")
+      _logfmt("camera_open_ok", got_w=got_w, got_h=got_h, got_fps=got_fps, fourcc=fcc_text or "RAW")
 
       DetectorRT._is_open = True
 
@@ -291,7 +376,7 @@ class DetectorRT:
 
   def release(self):
     """
-    Release camera and detroy and open windows.
+    Release camera and destroy any open windows, then log a session summary.
     """
     if self.cap is not None:
       with self._cap_lock:
@@ -301,6 +386,19 @@ class DetectorRT:
       self.cap = None
     cv2.destroyAllWindows()
     DetectorRT._is_open = False
+
+    # Session summary
+    frames = max(1, self.stats["frames"])
+    det_rate = self.stats["detect_frames"] / frames
+    _logfmt(
+      "session_summary",
+      frames=self.stats["frames"],
+      detect_frames=self.stats["detect_frames"],
+      detect_rate=f"{det_rate:.3f}",
+      read_failures=self.stats["read_failures"],
+      reopen_count=self.stats["reopen_count"],
+      avg_fps=f"{self.stats['ema_fps']:.1f}"
+    )
 
   def read(self):
     """
@@ -322,18 +420,27 @@ class DetectorRT:
     with self._cap_lock:
       with suppress_stderr():
         ok, frame = self.cap.read()
+
     if not ok or frame is None:
-      logger.warning("Camera read failed; attempting one-shot reopen…")
+      self.stats["read_failures"] += 1
+      if _rate.allow("cam_read_fail", every_sec=LOG_WARN_RATELIMIT):
+        _logfmt("camera_read_fail", level=logging.WARNING)
+
       try:
         self.release()
+        self.stats["reopen_count"] += 1
+        _logfmt("camera_reopen", count=self.stats["reopen_count"])
         self.open()
         with self._cap_lock:
           with suppress_stderr():
             ok, frame = self.cap.read()
       except Exception as e:
-        logger.error(f"Reopen failed: {e}")
+        logger.exception("Reopen failed")  # includes traceback
+        _logfmt("camera_reopen_failed", level=logging.ERROR, error=type(e).__name__)
         return None, {}
       if not ok or frame is None:
+        if _rate.allow("cam_read_fail_after_reopen", every_sec=max(5.0, LOG_WARN_RATELIMIT)):
+          _logfmt("camera_read_fail_after_reopen", level=logging.ERROR)
         return None, {}
 
     corners, ids, _ = self.detector.detectMarkers(frame)
@@ -347,6 +454,7 @@ class DetectorRT:
     if ids is not None and len(ids) > 0:
       # Draw the detected boundaries and their IDs
       cv2.aruco.drawDetectedMarkers(frame, corners, ids)
+
       # Compute centers and map to grid cells
       h, w = frame.shape[:2]
       for corner in corners:
@@ -380,13 +488,39 @@ class DetectorRT:
       self._fps_prev = now
       self._fps_counter = 0
 
-    cv2.putText(frame, 
-                f"{self._fps_display:.1f} FPS", 
-                (10, frame.shape[0]- 10), 
-                cv2.FONT_HERSHEY_SIMPLEX, 
-                0.6, 
-                (255, 255, 255), 
-                2, 
+    self.stats["frames"] += 1
+    if ids is not None and len(ids) > 0:
+      self.stats["detect_frames"] += 1
+
+    if self._fps_display > 0:
+      if self.stats["ema_fps"] == 0.0:
+        self.stats["ema_fps"] = float(self._fps_display)
+      else:
+        self.stats["ema_fps"] = (
+          0.2 * float(self._fps_display) + 0.8 * self.stats["ema_fps"]
+        )
+
+    # Sampled diagnostics
+    if (self.stats["frames"] % LOG_FRAME_SAMPLE_EVERY) == 0:
+      bright = float(frame.mean()) if frame is not None else -1.0
+      id_list = [] if ids is None else list(map(int, ids.flatten().tolist()))
+      _logfmt(
+        "frame_sample",
+        level=logging.DEBUG,
+        fps=f"{self._fps_display:.1f}",
+        mean_brightness=f"{bright:.2f}",
+        ids=len(id_list),
+        ids_list=",".join(map(str, id_list)) if id_list else "-"
+      )
+
+    # FPS overlay on frame
+    cv2.putText(frame,
+                f"{self._fps_display:.1f} FPS",
+                (10, frame.shape[0] - 10),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                (255, 255, 255),
+                2,
                 cv2.LINE_AA)
 
     results = {
@@ -398,6 +532,7 @@ class DetectorRT:
       "fps": self._fps_display
     }
 
+    # Overlays
     self._overlay_grid(frame)
     self._mark_occupied(frame) # Highlight the occupied cells and then draw grid
     self.last_results = results
@@ -405,6 +540,14 @@ class DetectorRT:
     with self._latest_lock:
       self._latest_frame = frame.copy()   # small cost; safe for readers
     self.last_results = results
+
+    # Occasional detection summary (every LOG_IDS_EVERY frames)
+    if (self.stats["frames"] % LOG_IDS_EVERY) == 0:
+      _logfmt("detect_summary",
+              n_ids=int(len(ids)) if (ids is not None) else 0,
+              do_pose=self._do_pose,
+              min_dist_m=(min(dists) if dists else -1),
+              max_dist_m=(max(dists) if dists else -1))
 
     return frame, results
 
@@ -461,7 +604,7 @@ class DetectorRT:
 
 def primary_target(results, frame_shape):
   """
-  Return (cx, cy, area_px) of the first detected marker, or None.
+  Return (cx, cy, area_px, W, H) of the first detected marker, or None.
   """
   corners = results.get("corners")
   if corners is None or len(corners) == 0:
