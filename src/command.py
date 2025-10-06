@@ -267,6 +267,7 @@ class Command:
       self._reset_estimator()
       time.sleep(1.0)
       self.drone_logger.start_logging()
+      logger.info("GO!!!!\n")
 
       while not done:
         for event in pygame.event.get():
