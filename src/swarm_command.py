@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Iterable, Dict
 from dotenv import load_dotenv
 load_dotenv(dotenv_path="config/.env") 
+import contextlib
 
 import cflib.crtp
 from cflib.crazyflie.swarm import Swarm, CachedCfFactory
@@ -61,8 +62,8 @@ class SwarmCommand:
     var_z_history = [1000.0] * WINDOW
 
     start = time.time()
-    with SyncLogger(scf, log_config) as logger:
-      for _, data, _ in logger:
+    with SyncLogger(scf, log_config) as sync_logger:
+      for _, data, _ in sync_logger:
         var_x_history.append(float(data['kalman.varPX'])); var_x_history.pop(0)
         var_y_history.append(float(data['kalman.varPY'])); var_y_history.pop(0)
         var_z_history.append(float(data['kalman.varPZ'])); var_z_history.pop(0)
@@ -137,17 +138,21 @@ class SwarmCommand:
     cflib.crtp.init_drivers(enable_debug_driver=False)
     self.swarm = Swarm(self.uris, factory=self.factory)
     self.swarm.open_links()
-    self.swarm.parallel_safe(self._light_check)
-
-    # Reset + param download + arm (in parallel)
-    logger.info("Resetting estimators...")
-    self.swarm.parallel_safe(self._reset_estimator)
-
-    logger.info("Waiting for swarm parameters to be downloaded...")
-    self.swarm.parallel_safe(self._wait_for_param_download)
-
-    logger.info("Arming swarm...")
-    self.swarm.parallel_safe(self._arm)
+    try:
+      self.swarm.parallel_safe(self._light_check)
+      logger.info("Resetting estimators...")
+      self.swarm.parallel_safe(self._reset_estimator)
+      logger.info("Waiting for swarm parameters to be downloaded...")
+      self.swarm.parallel_safe(self._wait_for_param_download)
+      logger.info("Arming swarm...")
+      self.swarm.parallel_safe(self._arm)
+    except Exception as e:
+      logger.error(f"Swarm bring-up failed: {e}", exc_info=True)
+      # Make sure we don’t leave half-open links
+      with contextlib.suppress(Exception):
+        self.swarm.close_links()
+      self.swarm = None
+      raise
 
     # Create MotionCommander per drone
     logger.info("Creating MotionCommander per drone...")

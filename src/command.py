@@ -318,13 +318,23 @@ class Command:
 
           # ensure swarm links are open & ready
           logger.info("Opening swarm links...")
-          self.swarm.open()
-
-          logger.info("Entering SWARM manual (takeoff all)...")
-          self.swarm.enter_manual()
-
-          self.swarm_active = True
-          self.ibvs_enable_event.set()
+          try:
+            self.swarm.open()
+            logger.info("Entering SWARM manual (takeoff all)...")
+            self.swarm.enter_manual()
+            self.swarm_active = True
+            self.ibvs_enable_event.set()
+          except Exception as e:
+            logger.error(f"Failed to enter swarm: {e}")
+            # Attempt to restore single-drone mode so the app keeps running
+            try:
+              self.drone._cf.open_link(self.drone.link_uri)
+              self._reset_estimator()
+              self.drone_logger.start_logging()
+            except Exception as e2:
+              logger.warning(f"Recovery to single-drone failed: {e2}")
+            # continue the loop; do NOT re-raise
+            continue
 
           # initialize targets from current primary link telemetry if available
           try:
