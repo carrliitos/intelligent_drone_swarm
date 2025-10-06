@@ -326,7 +326,7 @@ class DroneLogs:
     finally:
       if self.pid_rate_roll_log_config and self.pid_rate_roll_log_config.valid:
         self.pid_rate_roll_log_config.stop()
-        logger.info("Stopped pid_rate logging.")
+        logger.info("Stopped pid_rate_roll logging.")
 
   def _pid_rate_pitch(self):
     """
@@ -353,7 +353,7 @@ class DroneLogs:
     finally:
       if self.pid_rate_pitch_log_config and self.pid_rate_pitch_log_config.valid:
         self.pid_rate_pitch_log_config.stop()
-        logger.info("Stopped pid_rate logging.")
+        logger.info("Stopped pid_rate_pitch logging.")
 
   def _pid_rate_yaw(self):
     """
@@ -380,7 +380,7 @@ class DroneLogs:
     finally:
       if self.pid_rate_yaw_log_config and self.pid_rate_yaw_log_config.valid:
         self.pid_rate_yaw_log_config.stop()
-        logger.info("Stopped pid_rate logging.")
+        logger.info("Stopped pid_rate_yaw logging.")
 
   def _motor_states(self):
     """
