@@ -114,7 +114,7 @@ class SwarmCommand:
   @staticmethod
   def _light_check(scf, delay=0.1):
     cf = scf.cf
-    logger.info("Light check!")
+    logger.info(f"[{cf.link_uri}]: Light check!")
     time.sleep(1.0)
 
     GREEN = 138
@@ -125,7 +125,7 @@ class SwarmCommand:
       cf.param.set_value('led.bitmask', 0)
       time.sleep(delay)
 
-    logger.info("Light check complete.")
+    logger.info(f"[{cf.link_uri}]: Light check complete.")
     time.sleep(1.0)
 
   def open(self):
