@@ -4,6 +4,7 @@ import threading
 import sys
 import pandas as pd
 import datetime
+import contextlib
 
 from pathlib import Path
 from cflib.crazyflie.log import LogConfig
@@ -30,6 +31,9 @@ class DroneLogs:
     self.gyro_log_config = None
     self.control_log_config = None
     self.stateEstimate_log_config = None
+    self.stateEstimate_v_log_config = None
+    self.stateEstimate_pid_log_config = None
+    self.stateEstimate_kalman_log_config = None
     self.pid_rate_roll_log_config = None
     self.pid_rate_pitch_log_config = None
     self.pid_rate_yaw_log_config = None
@@ -185,6 +189,12 @@ class DroneLogs:
       self.control_log_config.stop()
     if self.stateEstimate_log_config and self.stateEstimate_log_config.valid:
       self.stateEstimate_log_config.stop()
+    if self.stateEstimate_v_log_config and self.stateEstimate_v_log_config.valid:
+      self.stateEstimate_v_log_config.stop()
+    if self.stateEstimate_pid_log_config and self.stateEstimate_pid_log_config.valid:
+      self.stateEstimate_pid_log_config.stop()
+    if self.stateEstimate_kalman_log_config and self.stateEstimate_kalman_log_config.valid:
+      self.stateEstimate_kalman_log_config.stop()
     if self.pid_rate_roll_log_config and self.pid_rate_roll_log_config.valid:
       self.pid_rate_roll_log_config.stop()
     if self.pid_rate_pitch_log_config and self.pid_rate_pitch_log_config.valid:
