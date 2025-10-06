@@ -74,6 +74,10 @@ class Command:
     self.z_ref = None
     self.yaw_ref_deg = None
 
+    self._vision_click = None
+    self._vision_toggle = None
+    self._vision_clear = None
+
   @staticmethod
   def _sat(x, lo, hi):
     return max(lo, min(hi, x))
@@ -82,6 +86,14 @@ class Command:
   def _wrap_pi(a):
     # wrap to [-pi, pi)
     return (a + math.pi) % (2.0 * math.pi) - math.pi
+
+  def set_vision_hooks(self, on_click=None, on_toggle=None, on_clear=None):
+    """
+    Inject lightweight vision callbacks so PyGame can interact with the detector.
+    """
+    self._vision_click = on_click
+    self._vision_toggle = on_toggle
+    self._vision_clear = on_clear
 
   def _wait_for_param_download(self):
     logger.info("Waiting for parameters to be downloaded.")
@@ -262,6 +274,42 @@ class Command:
     pygame.display.set_caption("Drone Flight Controls")
     font = pygame.font.SysFont("monospace", 16)
 
+    # Track video placement/dims for mapping PyGame clicks -> frame pixels
+    last_draw = { "x0": 0, "y0": 0, "tw": 0, "th": 0, "fw": 0, "fh": 0 }
+    last_click_pg = None   # (mx,my) in PyGame window coords
+    last_click_cv = None   # (fx,fy) in OpenCV frame coords
+
+    def _get_detector():
+      import importlib, sys
+      return getattr(sys.modules.get('main') or importlib.import_module('main'), "detector", None)
+
+    def _send_click_to_detector(mx, my):
+      nonlocal last_click_pg, last_click_cv
+
+      x0, y0, tw, th, fw, fh = (last_draw["x0"], last_draw["y0"], last_draw["tw"], last_draw["th"], last_draw["fw"], last_draw["fh"])
+      if tw <= 0 or th <= 0 or fw <= 0 or fh <= 0:
+        return
+      if not (x0 <= mx < x0 + tw and y0 <= my < y0 + th):
+        return
+
+      rx = (mx - x0) / float(tw)
+      ry = (my - y0) / float(th)
+      fx = int(round(rx * fw))
+      fy = int(round(ry * fh))
+      last_click_pg = (mx, my)
+      last_click_cv = (fx, fy)
+
+      try:
+        if self._vision_click:
+          self._vision_click(fx, fy)
+        else:
+          det = _get_detector()
+          if det:
+            det.set_click_point(fx, fy)
+      except Exception as e:
+        logger.debug(f"Failed to deliver click to detector: {e}")
+      logger.info(f"Click: pygame=({mx},{my})  frame=({fx},{fy})  rect=({x0},{y0},{tw}x{th}) src=({fw}x{fh})")
+
     try:
       logger.info("Resetting estimators.")
       self._reset_estimator()
@@ -274,11 +322,38 @@ class Command:
           if event.type == pygame.QUIT:
             pygame.quit()
             exit()
+          # left-click anywhere on the stream -> send to DetectorRT
+          if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            mx, my = event.pos
+            _send_click_to_detector(mx, my)
           if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_BACKSPACE:
               done = True
             if event.key == pygame.K_h:
               self._hover()
+            # Vision overlay hotkeys
+            if event.key == pygame.K_v:
+              try:
+                if self._vision_toggle:
+                  self._vision_toggle()
+                else:
+                  det = _get_detector()
+                  if det:
+                    det.toggle_delta()
+                logger.info("Toggled click-delta overlay (V).")
+              except Exception as e:
+                logger.debug(f"Toggle failed: {e}")
+            if event.key == pygame.K_c:
+              try:
+                if self._vision_clear:
+                  self._vision_clear()
+                else:
+                  det = _get_detector()
+                  if det:
+                    det.clear_click()
+                logger.info("Cleared click-delta point (C).")
+              except Exception as e:
+                logger.debug(f"Clear failed: {e}")
 
         keys = pygame.key.get_pressed()
         mods = pygame.key.get_mods()
@@ -410,6 +485,8 @@ class Command:
           x0 = (VIDEO_W - tw) // 2
           y0 = (VIDEO_H - th) // 2
           screen.blit(surf, (x0, y0))
+          # Save for click mapping
+          last_draw.update({"x0": x0, "y0": y0, "tw": tw, "th": th, "fw": fw, "fh": fh})
 
         info_y = SCREEN_H - INFO_H
         panel = pygame.Surface((SCREEN_W, INFO_H), pygame.SRCALPHA)
@@ -427,6 +504,8 @@ class Command:
           "Arrow Keys  | Move (Forward, Back, Left, Right)",
           "A / D       | Yaw left / right",
           "R / F       | Altitude up / down",
+          "V           | Toggle click-delta overlay (vision)",
+          "C           | Clear click-delta point (vision)",
           "Backspace   | Exit program"
         ]
 
@@ -446,6 +525,14 @@ class Command:
         txt_ids = font.render(ids_text, True, (120, 200, 255))
         screen.blit(txt_ids, (x, y))
         y += txt_ids.get_height() + 10
+
+        if last_click_pg or last_click_cv:
+          if last_click_pg:
+            txt = font.render(f"Click (PyGame):  ({last_click_pg[0]}, {last_click_pg[1]})", True, (180, 220, 180))
+            screen.blit(txt, (x, y)); y += txt.get_height() + 4
+          if last_click_cv:
+            txt = font.render(f"Click (Frame):   ({last_click_cv[0]}, {last_click_cv[1]})", True, (180, 220, 180))
+            screen.blit(txt, (x, y)); y += txt.get_height() + 8
 
         for line in instructions:
           txt = font.render(line, True, (230, 230, 230))
