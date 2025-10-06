@@ -9,6 +9,8 @@ import numpy as np
 import importlib
 from pathlib import Path
 from collections import deque
+from dotenv import load_dotenv
+load_dotenv(dotenv_path="config/.env") 
 
 from cflib.crazyflie.log import LogConfig
 from cflib.crazyflie.syncLogger import SyncLogger
@@ -23,7 +25,11 @@ import vision
 directory = context.get_context(os.path.abspath(__file__))
 logger_file_name = Path(directory).stem
 logger_name = Path(__file__).stem
-logger = logger.setup_logger(logger_name, f"{directory}/logs/{logger_file_name}.log")
+logger = logger.setup_logger(
+  logger_name=logger_name, 
+  log_file=f"{directory}/logs/{logger_file_name}.log", 
+  log_level=os.getenv("LOG_LEVEL")
+)
 
 class Command:
   def __init__(self, 
@@ -261,6 +267,7 @@ class Command:
       self._reset_estimator()
       time.sleep(1.0)
       self.drone_logger.start_logging()
+      logger.info("GO!!!!\n")
 
       while not done:
         for event in pygame.event.get():
@@ -296,6 +303,12 @@ class Command:
           # Release single-drone link if it's part of the swarm set
           try:
             if hasattr(self.drone, "_cf") and hasattr(self.drone._cf, "link_uri"):
+              # stop logging cleanly  before closing the link to avoid LogEntry if errors
+              try:
+                self.drone_logger.stop_logging()
+              except Exception as e:
+                logger.warning(f"Could not stop logging before swarm: {e}")
+
               if getattr(self.swarm, "uris", ()) and (self.drone._cf.link_uri in self.swarm.uris):
                 logger.info(f"Releasing primary link {self.drone._cf.link_uri} for swarm…")
                 self.drone._cf.close_link()
@@ -305,13 +318,23 @@ class Command:
 
           # ensure swarm links are open & ready
           logger.info("Opening swarm links...")
-          self.swarm.open()
-
-          logger.info("Entering SWARM manual (takeoff all)...")
-          self.swarm.enter_manual()
-
-          self.swarm_active = True
-          self.ibvs_enable_event.set()
+          try:
+            self.swarm.open()
+            logger.info("Entering SWARM manual (takeoff all)...")
+            self.swarm.enter_manual()
+            self.swarm_active = True
+            self.ibvs_enable_event.set()
+          except Exception as e:
+            logger.error(f"Failed to enter swarm: {e}")
+            # Attempt to restore single-drone mode so the app keeps running
+            try:
+              self.drone._cf.open_link(self.drone.link_uri)
+              self._reset_estimator()
+              self.drone_logger.start_logging()
+            except Exception as e2:
+              logger.warning(f"Recovery to single-drone failed: {e2}")
+            # continue the loop; do NOT re-raise
+            continue
 
           # initialize targets from current primary link telemetry if available
           try:
@@ -345,12 +368,13 @@ class Command:
             # Reconnect primary link so single-drone controls work again
             try:
               if hasattr(self.drone, "_cf") and hasattr(self.drone, "link_uri"):
-                logger.info(f"Reconnecting primary link {self.drone.link_uri}…")
+                logger.info(f"Reconnecting primary link {self.drone.link_uri}...")
                 self.drone._cf.open_link(self.drone.link_uri)
-                # restore estimator state for single-drone path
                 self._reset_estimator()
+                # re-start logging now that single-drone link is back
+                self.drone_logger.start_logging()
             except Exception as e:
-              logger.warning(f"Failed to reconnect primary link: {e}")
+              logger.warning(f"Failed to reconnect/restart logging: {e}")
 
         # Per-frame control
         if self.swarm_active:

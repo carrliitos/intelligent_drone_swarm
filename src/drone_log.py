@@ -4,6 +4,7 @@ import threading
 import sys
 import pandas as pd
 import datetime
+import contextlib
 
 from pathlib import Path
 from cflib.crazyflie.log import LogConfig
@@ -30,6 +31,9 @@ class DroneLogs:
     self.gyro_log_config = None
     self.control_log_config = None
     self.stateEstimate_log_config = None
+    self.stateEstimate_v_log_config = None
+    self.stateEstimate_pid_log_config = None
+    self.stateEstimate_kalman_log_config = None
     self.pid_rate_roll_log_config = None
     self.pid_rate_pitch_log_config = None
     self.pid_rate_yaw_log_config = None
@@ -153,6 +157,9 @@ class DroneLogs:
     pid_rate_pitch_logs = threading.Thread(target=self._pid_rate_pitch, daemon=True)
     pid_rate_yaw_logs = threading.Thread(target=self._pid_rate_yaw, daemon=True)
     state_estimates_logs = threading.Thread(target=self._stateEstimate, daemon=True)
+    state_estimates_v_logs = threading.Thread(target=self._stateEstimate_v, daemon=True)
+    state_estimates_pid_logs = threading.Thread(target=self._stateEstimate_pid, daemon=True)
+    state_estimates_kalman_logs = threading.Thread(target=self._stateEstimate_kalman, daemon=True)
 
     # Actually start logging
     battery_logs.start()
@@ -163,6 +170,9 @@ class DroneLogs:
     pid_rate_pitch_logs.start()
     pid_rate_yaw_logs.start()
     state_estimates_logs.start()
+    state_estimates_v_logs.start()
+    state_estimates_pid_logs.start()
+    state_estimates_kalman_logs.start()
 
   def stop_logging(self):
     """
@@ -179,6 +189,12 @@ class DroneLogs:
       self.control_log_config.stop()
     if self.stateEstimate_log_config and self.stateEstimate_log_config.valid:
       self.stateEstimate_log_config.stop()
+    if self.stateEstimate_v_log_config and self.stateEstimate_v_log_config.valid:
+      self.stateEstimate_v_log_config.stop()
+    if self.stateEstimate_pid_log_config and self.stateEstimate_pid_log_config.valid:
+      self.stateEstimate_pid_log_config.stop()
+    if self.stateEstimate_kalman_log_config and self.stateEstimate_kalman_log_config.valid:
+      self.stateEstimate_kalman_log_config.stop()
     if self.pid_rate_roll_log_config and self.pid_rate_roll_log_config.valid:
       self.pid_rate_roll_log_config.stop()
     if self.pid_rate_pitch_log_config and self.pid_rate_pitch_log_config.valid:
@@ -199,19 +215,7 @@ class DroneLogs:
       self.stateEstimate_log_config.add_variable("stateEstimate.y", "float")
       self.stateEstimate_log_config.add_variable("stateEstimate.z", "float")
 
-      self.stateEstimate_log_config.add_variable("stateEstimate.vx", "float")
-      self.stateEstimate_log_config.add_variable("stateEstimate.vy", "float")
-      self.stateEstimate_log_config.add_variable("stateEstimate.vz", "float")
-
-      self.stateEstimate_log_config.add_variable("stateEstimate.roll", "float")
-      self.stateEstimate_log_config.add_variable("stateEstimate.pitch", "float")
-      self.stateEstimate_log_config.add_variable("stateEstimate.yaw", "float")
-
       self.stateEstimate_log_config.add_variable("range.zrange", "float")
-
-      self.stateEstimate_log_config.add_variable("kalman.varPX", "float")
-      self.stateEstimate_log_config.add_variable("kalman.varPY", "float")
-      self.stateEstimate_log_config.add_variable("kalman.varPZ", "float")
 
       self._cf.log.add_config(self.stateEstimate_log_config)
       self.stateEstimate_log_config.data_received_cb.add_callback(self._log_callback__stateEstimate)
@@ -229,11 +233,89 @@ class DroneLogs:
         self.stateEstimate_log_config.stop()
         logger.info("Stopped stateEstimate logging.")
 
+  def _stateEstimate_v(self):
+    """
+    Log state estimates.
+    """
+    self.stateEstimate_v_log_config = LogConfig(name="stateEstimate_v", period_in_ms=500)
+
+    try:
+      self.stateEstimate_v_log_config.add_variable("stateEstimate.vx", "float")
+      self.stateEstimate_v_log_config.add_variable("stateEstimate.vy", "float")
+      self.stateEstimate_v_log_config.add_variable("stateEstimate.vz", "float")
+
+      self._cf.log.add_config(self.stateEstimate_v_log_config)
+      self.stateEstimate_v_log_config.data_received_cb.add_callback(self._log_callback__stateEstimate_v)
+      self.stateEstimate_v_log_config.error_cb.add_callback(self._log_error_callback)
+      self.stateEstimate_v_log_config.start()
+
+      # Keep logging until the stop event is triggered
+      while self._cf and self._cf.state != 0 and not self._stop_event.is_set():
+        time.sleep(1)
+
+    except Exception as e:
+      logger.error(f"Unexpected error: {e}")
+    finally:
+      if self.stateEstimate_v_log_config and self.stateEstimate_v_log_config.valid:
+        self.stateEstimate_v_log_config.stop()
+        logger.info("Stopped stateEstimate_v logging.")
+
+  def _stateEstimate_pid(self):
+    """
+    Log state estimates.
+    """
+    self.stateEstimate_pid_log_config = LogConfig(name="stateEstimate_pid", period_in_ms=500)
+
+    try:
+      self.stateEstimate_pid_log_config.add_variable("stateEstimate.roll", "float")
+      self.stateEstimate_pid_log_config.add_variable("stateEstimate.pitch", "float")
+      self.stateEstimate_pid_log_config.add_variable("stateEstimate.yaw", "float")
+
+      self._cf.log.add_config(self.stateEstimate_pid_log_config)
+      self.stateEstimate_pid_log_config.data_received_cb.add_callback(self._log_callback__stateEstimate_pid)
+      self.stateEstimate_pid_log_config.error_cb.add_callback(self._log_error_callback)
+      self.stateEstimate_pid_log_config.start()
+
+      # Keep logging until the stop event is triggered
+      while self._cf and self._cf.state != 0 and not self._stop_event.is_set():
+        time.sleep(1)
+
+    except Exception as e:
+      logger.error(f"Unexpected error: {e}")
+    finally:
+      if self.stateEstimate_pid_log_config and self.stateEstimate_pid_log_config.valid:
+        self.stateEstimate_pid_log_config.stop()
+        logger.info("Stopped stateEstimate_pid logging.")
+
+  def _stateEstimate_kalman(self):
+    self.stateEstimate_kalman_log_config = LogConfig(name="stateEstimate_kalman", period_in_ms=500)
+
+    try:
+      self.stateEstimate_kalman_log_config.add_variable("kalman.varPX", "float")
+      self.stateEstimate_kalman_log_config.add_variable("kalman.varPY", "float")
+      self.stateEstimate_kalman_log_config.add_variable("kalman.varPZ", "float")
+
+      self._cf.log.add_config(self.stateEstimate_kalman_log_config)
+      self.stateEstimate_kalman_log_config.data_received_cb.add_callback(self._log_callback__stateEstimate_kalman)
+      self.stateEstimate_kalman_log_config.error_cb.add_callback(self._log_error_callback)
+      self.stateEstimate_kalman_log_config.start()
+
+      # Keep logging until the stop event is triggered
+      while self._cf and self._cf.state != 0 and not self._stop_event.is_set():
+        time.sleep(1)
+
+    except Exception as e:
+      logger.error(f"Unexpected error: {e}")
+    finally:
+      if self.stateEstimate_kalman_log_config and self.stateEstimate_kalman_log_config.valid:
+        self.stateEstimate_kalman_log_config.stop()
+        logger.info("Stopped stateEstimate_kalman logging.")    
+
   def _pid_rate_roll(self):
     """
     Log PID Roll Rates.
     """
-    self.pid_rate_roll_log_config = LogConfig(name="pid_rate", period_in_ms=500)
+    self.pid_rate_roll_log_config = LogConfig(name="pid_rate_roll", period_in_ms=500)
 
     try:
       self.pid_rate_roll_log_config.add_variable("pid_rate.roll_outP", "float")
@@ -254,13 +336,13 @@ class DroneLogs:
     finally:
       if self.pid_rate_roll_log_config and self.pid_rate_roll_log_config.valid:
         self.pid_rate_roll_log_config.stop()
-        logger.info("Stopped pid_rate logging.")
+        logger.info("Stopped pid_rate_roll logging.")
 
   def _pid_rate_pitch(self):
     """
     Log PID pitch Rates.
     """
-    self.pid_rate_pitch_log_config = LogConfig(name="pid_rate", period_in_ms=500)
+    self.pid_rate_pitch_log_config = LogConfig(name="pid_rate_pitch", period_in_ms=500)
 
     try:
       self.pid_rate_pitch_log_config.add_variable("pid_rate.pitch_outP", "float")
@@ -281,13 +363,13 @@ class DroneLogs:
     finally:
       if self.pid_rate_pitch_log_config and self.pid_rate_pitch_log_config.valid:
         self.pid_rate_pitch_log_config.stop()
-        logger.info("Stopped pid_rate logging.")
+        logger.info("Stopped pid_rate_pitch logging.")
 
   def _pid_rate_yaw(self):
     """
     Log PID yaw Rates.
     """
-    self.pid_rate_yaw_log_config = LogConfig(name="pid_rate", period_in_ms=500)
+    self.pid_rate_yaw_log_config = LogConfig(name="pid_rate_yaw", period_in_ms=500)
 
     try:
       self.pid_rate_yaw_log_config.add_variable("pid_rate.yaw_outP", "float")
@@ -308,7 +390,7 @@ class DroneLogs:
     finally:
       if self.pid_rate_yaw_log_config and self.pid_rate_yaw_log_config.valid:
         self.pid_rate_yaw_log_config.stop()
-        logger.info("Stopped pid_rate logging.")
+        logger.info("Stopped pid_rate_yaw logging.")
 
   def _motor_states(self):
     """
@@ -420,25 +502,31 @@ class DroneLogs:
         logger.info("Stopped battery logging.")
 
   def _log_callback__stateEstimate(self, timestamp, data, logconf):
-    """ Callback for PID rates data. """
+    """ Callback for state estimates data. """
     with self.lock:
       self.stateEstimate_x = data["stateEstimate.x"]
       self.stateEstimate_y = data["stateEstimate.y"]
       self.stateEstimate_z = data["stateEstimate.z"]
 
+      self.range_zrange = data["range.zrange"]
+
+  def _log_callback__stateEstimate_v(self, timestamp, data, logconf):
+    with self.lock:
       self.stateEstimate_vx = data["stateEstimate.vx"]
       self.stateEstimate_vy = data["stateEstimate.vy"]
       self.stateEstimate_vz = data["stateEstimate.vz"]
 
+  def _log_callback__stateEstimate_pid(self, timestamp, data, logconf):
+    with self.lock:
       self.stateEstimate_roll = data["stateEstimate.roll"]
       self.stateEstimate_pitch = data["stateEstimate.pitch"]
       self.stateEstimate_yaw = data["stateEstimate.yaw"]
 
-      self.range_zrange = data["range.zrange"]
-
-      self.range_zrange = data["kalman.varPX"]
-      self.range_zrange = data["kalman.varPY"]
-      self.range_zrange = data["kalman.varPZ"]
+  def _log_callback__stateEstimate_kalman(self, timestamp, data, logconf):
+    with self.lock:
+      self.kalman_varPX = data["kalman.varPX"]
+      self.kalman_varPY = data["kalman.varPY"]
+      self.kalman_varPZ = data["kalman.varPZ"]
 
   def _log_callback__pid_rate_roll(self, timestamp, data, logconf):
     """ Callback for PID rates data. """
