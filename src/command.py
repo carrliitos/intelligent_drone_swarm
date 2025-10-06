@@ -302,6 +302,12 @@ class Command:
           # Release single-drone link if it's part of the swarm set
           try:
             if hasattr(self.drone, "_cf") and hasattr(self.drone._cf, "link_uri"):
+              # stop logging cleanly  before closing the link to avoid LogEntry if errors
+              try:
+                self.drone_logger.stop_logging()
+              except Exception as e:
+                logger.warning(f"Could not stop logging before swarm: {e}")
+
               if getattr(self.swarm, "uris", ()) and (self.drone._cf.link_uri in self.swarm.uris):
                 logger.info(f"Releasing primary link {self.drone._cf.link_uri} for swarm…")
                 self.drone._cf.close_link()
@@ -351,12 +357,13 @@ class Command:
             # Reconnect primary link so single-drone controls work again
             try:
               if hasattr(self.drone, "_cf") and hasattr(self.drone, "link_uri"):
-                logger.info(f"Reconnecting primary link {self.drone.link_uri}…")
+                logger.info(f"Reconnecting primary link {self.drone.link_uri}...")
                 self.drone._cf.open_link(self.drone.link_uri)
-                # restore estimator state for single-drone path
                 self._reset_estimator()
+                # re-start logging now that single-drone link is back
+                self.drone_logger.start_logging()
             except Exception as e:
-              logger.warning(f"Failed to reconnect primary link: {e}")
+              logger.warning(f"Failed to reconnect/restart logging: {e}")
 
         # Per-frame control
         if self.swarm_active:
