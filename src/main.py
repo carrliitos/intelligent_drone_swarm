@@ -95,6 +95,12 @@ def run(connection_type, use_vision=False, use_control=False, swarm_uris=None):
       )
       detector.open()
 
+      command.set_vision_hooks(
+        on_click=detector.set_click_point,
+        on_toggle=detector.toggle_delta,
+        on_clear=detector.clear_click
+      )
+
       def _vision_loop():
         max_w, max_h = 960, 540
         last_ok = time.time()
