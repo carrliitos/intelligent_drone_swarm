@@ -1,6 +1,7 @@
 import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
+import contextlib
 import numpy as np
 import pygame
 import os
@@ -69,7 +70,7 @@ def run(connection_type, use_vision=False, use_control=False, swarm_uris=None):
     time.sleep(5.0)
 
     if use_vision:
-      logger.info("==========Connecting to OpenCV==========")
+      logger.info("==========Connecting to vision==========")
       detector = DetectorRT(
         dictionary=os.getenv("ARUCO_DICTIONARY"),
         camera=helpers._i(os.getenv("CAMERA_CONNECTION")),
@@ -125,6 +126,7 @@ def run(connection_type, use_vision=False, use_control=False, swarm_uris=None):
       vision_thread.start()
 
       if use_control:
+        logger.info("==========Control-loop open==========")
         ctrl_stop = threading.Event()
         def _ctrl_loop():
           try:
@@ -156,25 +158,22 @@ def run(connection_type, use_vision=False, use_control=False, swarm_uris=None):
     logger.error(f"Error: {e}")
     sys.exit(1)
   finally:
+    # stop control/vision loops first
+    if 'ctrl_stop' in locals(): ctrl_stop.set()
+    if 'ctrl_thread' in locals(): ctrl_thread.join(timeout=2.0)
+
     if detector:
       stop_vision.set()
-      if vision_thread:
-        vision_thread.join(timeout=2.0)
-      try:
-        if 'ctrl_stop' in locals():
-          ctrl_stop.set()
-        if 'ctrl_thread' in locals():
-          ctrl_thread.join(timeout=2.0)
-        detector.release()
-      except Exception:
-        pass
+      if vision_thread: vision_thread.join(timeout=2.0)
+      with contextlib.suppress(Exception): detector.release()
+
+    # land swarm before closing any links
+    if swarm_cmd:
+      with contextlib.suppress(Exception): swarm_cmd.land()
+      with contextlib.suppress(Exception): swarm_cmd.close()
 
     if drone:
-      drone._cf.close_link()
-
-    if swarm_cmd:
-      swarm_cmd.land()
-      swarm_cmd.close()
+      with contextlib.suppress(Exception): drone._cf.close_link()
 
 def print_usage():
   print("Usage:")
@@ -210,6 +209,34 @@ def cli():
       logger.error(f"Invalid radio channel: {channel}")
       print_usage()
     extras = set(args[2:])
+  elif args[0] == "swarm":
+    # tokens after "swarm"
+    tail = sys.argv[2:]
+    # split into channels (digits) and extras (strings)
+    channels, extras = [], set()
+    for tok in tail:
+      if tok.isdigit():
+        channels.append(tok)
+      else:
+        extras.add(tok.lower())
+
+    if not channels:
+      logger.error("Provide at least one radio channel for swarm.")
+      print_usage()
+
+    bad = [c for c in channels if c not in RADIO_CHANNELS]
+    if bad:
+      logger.error(f"Invalid radio channel(s): {', '.join(bad)}")
+      print_usage()
+
+    swarm_uris = [RADIO_CHANNELS[c] for c in channels]
+    first = channels[0]
+    connection_type = RADIO_CHANNELS[first]
+    use_vision = "vision" in extras
+    use_control = "control" in extras and use_vision
+    logger.info(f"Swarm URIs: {swarm_uris} | vision={use_vision} control={use_control}")
+    run(connection_type, use_vision=use_vision, use_control=use_control, swarm_uris=swarm_uris)
+    sys.exit(0)
   else:
     logger.error(f"Invalid connection type: {args[0]}")
     print_usage()

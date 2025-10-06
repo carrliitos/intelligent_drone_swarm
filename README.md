@@ -72,4 +72,6 @@ Basic usage:
 fly udp
 fly radio 7
 fly radio 8 vision
+fly swarm 7 8
+fly swarm 7 8 vision
 ```
