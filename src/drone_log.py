@@ -305,7 +305,7 @@ class DroneLogs:
     """
     Log PID Roll Rates.
     """
-    self.pid_rate_roll_log_config = LogConfig(name="pid_rate", period_in_ms=500)
+    self.pid_rate_roll_log_config = LogConfig(name="pid_rate_roll", period_in_ms=500)
 
     try:
       self.pid_rate_roll_log_config.add_variable("pid_rate.roll_outP", "float")
@@ -332,7 +332,7 @@ class DroneLogs:
     """
     Log PID pitch Rates.
     """
-    self.pid_rate_pitch_log_config = LogConfig(name="pid_rate", period_in_ms=500)
+    self.pid_rate_pitch_log_config = LogConfig(name="pid_rate_pitch", period_in_ms=500)
 
     try:
       self.pid_rate_pitch_log_config.add_variable("pid_rate.pitch_outP", "float")
@@ -359,7 +359,7 @@ class DroneLogs:
     """
     Log PID yaw Rates.
     """
-    self.pid_rate_yaw_log_config = LogConfig(name="pid_rate", period_in_ms=500)
+    self.pid_rate_yaw_log_config = LogConfig(name="pid_rate_yaw", period_in_ms=500)
 
     try:
       self.pid_rate_yaw_log_config.add_variable("pid_rate.yaw_outP", "float")
