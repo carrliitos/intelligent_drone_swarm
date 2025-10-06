@@ -112,7 +112,8 @@ class SwarmCommand:
     time.sleep(0.5)
 
   @staticmethod
-  def _light_check(self, delay=0.1):
+  def _light_check(scf, delay=0.1):
+    cf = scf.cf
     logger.info("Light check!")
     time.sleep(1.0)
 
