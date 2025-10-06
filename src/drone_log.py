@@ -436,9 +436,9 @@ class DroneLogs:
 
       self.range_zrange = data["range.zrange"]
 
-      self.range_zrange = data["kalman.varPX"]
-      self.range_zrange = data["kalman.varPY"]
-      self.range_zrange = data["kalman.varPZ"]
+      self.kalman_varPX = data["kalman.varPX"]
+      self.kalman_varPY = data["kalman.varPY"]
+      self.kalman_varPZ = data["kalman.varPZ"]
 
   def _log_callback__pid_rate_roll(self, timestamp, data, logconf):
     """ Callback for PID rates data. """
