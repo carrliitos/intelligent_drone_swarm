@@ -1,6 +1,7 @@
 import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
+import contextlib
 import numpy as np
 import pygame
 import os
