@@ -272,7 +272,7 @@ class Command:
     pygame.init()
     screen = pygame.display.set_mode((600, 600), pygame.RESIZABLE)
     pygame.display.set_caption("Drone Flight Controls")
-    font = pygame.font.SysFont("monospace", 16)
+    font = pygame.font.SysFont("monospace", 12)
 
     # Track video placement/dims for mapping PyGame clicks -> frame pixels
     last_draw = { "x0": 0, "y0": 0, "tw": 0, "th": 0, "fw": 0, "fh": 0 }
