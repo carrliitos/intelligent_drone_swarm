@@ -1,3 +1,4 @@
+import io
 import math
 import time
 import os
@@ -30,6 +31,18 @@ logger = logger.setup_logger(
   log_file=f"{directory}/logs/{logger_file_name}.log", 
   log_level=os.getenv("LOG_LEVEL")
 )
+
+# Multi-window support (PyGame 2.x / SLD2)
+MULTIWIN = False
+try:
+  from pygame._sdl2.video import Window, Renderer, Texture
+  _HAS_REN_COPY = hasattr(Renderer, "copy")
+  MULTIWIN = True
+except Exception:
+  MULTIWIN = False
+
+def _has_multiwin():
+  return MULTIWIN
 
 class Command:
   def __init__(self, 
@@ -270,14 +283,62 @@ class Command:
 
     logger.info("In pygame function")
     pygame.init()
-    screen = pygame.display.set_mode((600, 600), pygame.RESIZABLE)
-    pygame.display.set_caption("Drone Flight Controls")
     font = pygame.font.SysFont("monospace", 12)
+    video_size = (960, 520)
+    console_size = (520, 600)
+
+    if _has_multiwin():
+      # two real OS windows
+      video_win = Window("Drone View", size=video_size, resizable=True)
+      console_win = Window("Drone Console", size=console_size, resizable=True)
+
+      video_ren = Renderer(video_win)
+      console_ren = Renderer(console_win)
+
+      # For text, we render to a Surface then to a Texture per frame
+      logger.info("Dual-window mode enabled (SDL2).")
+    else:
+      # Fallback: single window with a top video area + bottom console panel
+      screen = pygame.display.set_mode((600, 600), pygame.RESIZABLE)
+      pygame.display.set_caption("Drone Flight Controls")
+      logger.info("Single-window fallback (no _sdl2).")
 
     # Track video placement/dims for mapping PyGame clicks -> frame pixels
     last_draw = { "x0": 0, "y0": 0, "tw": 0, "th": 0, "fw": 0, "fh": 0 }
     last_click_pg = None   # (mx,my) in PyGame window coords
     last_click_cv = None   # (fx,fy) in OpenCV frame coords
+
+    # Helper for creating textures from surfaces in _sdl2 mode
+    def _blit_texture(ren: "Renderer", surf: "pygame.Surface"):
+      try:
+        tex = Texture.from_surface(ren, surf)
+      except Exception:
+        try:
+          ren.clear()
+          ren.present()
+        except Exception:
+          pass
+        return
+
+      try:
+        ren.clear()
+
+        if '_HAS_REN_COPY' in globals() and _HAS_REN_COPY:
+          ren.copy(tex)
+        else:
+          tex.draw()
+
+        ren.present()
+      except Exception:
+        try:
+          ren.present()
+        except Exception:
+          pass
+      finally:
+        try:
+          tex.destroy()
+        except Exception:
+          pass
 
     def _get_detector():
       import importlib, sys
@@ -294,21 +355,48 @@ class Command:
 
       rx = (mx - x0) / float(tw)
       ry = (my - y0) / float(th)
-      fx = int(round(rx * fw))
-      fy = int(round(ry * fh))
-      last_click_pg = (mx, my)
-      last_click_cv = (fx, fy)
+      # Store for on-screen debug (normalized + preview pixels)
+      last_click_g = (mx, my)
+      last_click_cv = (int(round(rx * fw)), int(round(ry * fh)))
 
       try:
         if self._vision_click:
-          self._vision_click(fx, fy)
+          # prefer the normalized method if its available
+          det = _get_detector()
+          if det and hasattr(det, "set_click_point_normalized"):
+            det.set_click_point_normalized(rx, ry)
+          else:
+            # Fallback: best-effort pixel mapping against detector/native size if exposed
+            src_w, src_h = fw, fh
+            try:
+              main_mod = sys.modules.get('main') or importlib.import_module('main')
+              with main_mod._latest_frame_lock:
+                src_w, src_h = getattr(main_mod, "_latest_src_wh", (fw, fh))
+                if not src_w or not src_h:
+                  src_w, src_h = fw, fh
+            except Exception as e:
+              pass
+            fx = int(round(rx * src_w))
+            fy = int(round(ry * src_h))
+            self._vision_click(fx, fy)
         else:
           det = _get_detector()
           if det:
-            det.set_click_point(fx, fy)
+            if hasattr(det, "set_click_point_normalized"):
+              det.set_click_point_normalized(rx, ry)
+            else:
+              # Same fallback logic as above
+              src_w, src_h = fw, fh
+              try:
+                main_mod = sys.modules.get('main') or importlib.import_module('main')
+                with main_mod._latest_frame_lock:
+                  src_w, src_h = getattr(main_mod, "_latest_src_wh", (fw, fh))
+              except Exception as e:
+                pass
+              det.set_click_point(int(round(rx * src_w)), int(round(ry * src_h)))
       except Exception as e:
         logger.debug(f"Failed to deliver click to detector: {e}")
-      logger.info(f"Click: pygame=({mx},{my})  frame=({fx},{fy})  rect=({x0},{y0},{tw}x{th}) src=({fw}x{fh})")
+      logger.info(f"Click: pygame=({mx},{my})  norm=({rx:.3f},{ry:.3f}) rect=({x0},{y0},{tw}x{th}) preview=({fw}x{fh})")
 
     try:
       logger.info("Resetting estimators.")
@@ -320,12 +408,18 @@ class Command:
       while not done:
         for event in pygame.event.get():
           if event.type == pygame.QUIT:
-            pygame.quit()
-            exit()
+            done = True
+            break
           # left-click anywhere on the stream -> send to DetectorRT
           if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-            mx, my = event.pos
-            _send_click_to_detector(mx, my)
+            # Only accepting clicks inside the video window on dual-window mode
+            if _has_multiwin():
+              # MOUSEBUTTONDOWN carries window position already local
+              mx, my = event.pos
+              _send_click_to_detector(mx, my)
+            else:
+              mx, my = event.pos
+              _send_click_to_detector(mx, my)
           if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_BACKSPACE:
               done = True
@@ -457,13 +551,7 @@ class Command:
         else:
           self._go(keys)
 
-        screen.fill((0, 0, 0))
-
-        SCREEN_W, SCREEN_H = screen.get_size()
-        INFO_H = max(140, SCREEN_H // 4) # bottom info strip height
-        VIDEO_W = SCREEN_W
-        VIDEO_H = SCREEN_H - INFO_H # top area reserved for video
-
+        # RENDER VIDEO WINDOW
         frame_rgb = None
         try:
           main_mod = sys.modules.get('main') or importlib.import_module('main')
@@ -473,25 +561,56 @@ class Command:
         except Exception as e:
           logger.debug(f"preview copy failed: {e}")
 
-        if frame_rgb is not None:
-          fh, fw = frame_rgb.shape[:2]
-          scale = min(VIDEO_W / fw, VIDEO_H / fh)
-          tw, th = int(fw * scale), int(fh * scale)
+        if _has_multiwin():
+          # size of the video window
+          vw, vh = video_win.size
+          # Compute the target size preserving the aspect ratio
+          if frame_rgb is not None:
+            fh, fw = frame_rgb.shape[:2]
+            scale = min(vw / fw, vh / fh)
+            tw, th = int(fw * scale), int(fh * scale)
+            surf = pygame.image.frombuffer(frame_rgb.tobytes(), (fw, fh), "RGB")
 
-          surf = pygame.image.frombuffer(frame_rgb.tobytes(), (fw, fh), "RGB")
-          if (tw, th) != (fw, fh):
-            surf = pygame.transform.smoothscale(surf, (tw, th))
+            if (tw, th) != (fw, fh):
+              surf = pygame.transform.smoothscale(surf, (tw, th))
 
-          x0 = (VIDEO_W - tw) // 2
-          y0 = (VIDEO_H - th) // 2
-          screen.blit(surf, (x0, y0))
-          # Save for click mapping
-          last_draw.update({"x0": x0, "y0": y0, "tw": tw, "th": th, "fw": fw, "fh": fh})
+            # letterbox center
+            x0 = (vw - tw) // 2
+            y0 = (vh - th) // 2
 
-        info_y = SCREEN_H - INFO_H
-        panel = pygame.Surface((SCREEN_W, INFO_H), pygame.SRCALPHA)
-        panel.fill((18, 18, 22, 220))   # RGBA with alpha
-        screen.blit(panel, (0, info_y))
+            # build a target surface matching window size to center-blit
+            canvas = pygame.Surface((vw, vh))
+            canvas.fill((0,0,0))
+            canvas.blit(surf, (x0, y0))
+            _blit_texture(video_ren, canvas)
+
+            # Save for click mapping
+            last_draw.update({"x0": x0, "y0": y0, "tw": tw, "th": th, "fw": fw, "fh": fh})
+          else:
+            # clear if no frame yet
+            video_ren.clear()
+            video_ren.present()
+        else:
+          # Single-window fallback layout
+          screen.fill((0, 0, 0))
+          SCREEN_W, SCREEN_H = screen.get_size()
+          INFO_H = max(140, SCREEN_H // 4) # bottom info strip height
+          VIDEO_W = SCREEN_W
+          VIDEO_H = SCREEN_H - INFO_H # top area reserved for video
+
+          if frame_rgb is not None:
+            fh, fw = frame_rgb.shape[:2]
+            scale = min(VIDEO_W / fw, VIDEO_H / fh)
+            tw, th = int(fw * scale), int(fh * scale)
+            surf = pygame.image.frombuffer(frame_rgb.tobytes(), (fw, fh), "RGB")
+
+            if (tw, th) != (fw, fh):
+              surf = pygame.transform.smoothscale(surf, (tw, th))
+
+            x0 = (VIDEO_W - tw) // 2
+            y0 = (VIDEO_H - th) // 2
+            screen.blit(surf, (x0, y0))
+            last_draw.update({"x0": x0, "y0": y0, "tw": tw, "th": th, "fw": fw, "fh": fh})
 
         instructions = [
           "Drone Control",
@@ -509,8 +628,8 @@ class Command:
           "Backspace   | Exit program"
         ]
 
+        # RENDER CONSOLE WINDOW
         pad_x, pad_y = 16, 12
-        x, y = pad_x, info_y + pad_y
         clock = pygame.time.Clock()
 
         try:
@@ -522,28 +641,63 @@ class Command:
           ids_list = []
 
         ids_text = "IDs: " + (", ".join(map(str, ids_list)) if ids_list else "—")
-        txt_ids = font.render(ids_text, True, (120, 200, 255))
-        screen.blit(txt_ids, (x, y))
-        y += txt_ids.get_height() + 10
 
-        if last_click_pg or last_click_cv:
-          if last_click_pg:
-            txt = font.render(f"Click (PyGame):  ({last_click_pg[0]}, {last_click_pg[1]})", True, (180, 220, 180))
-            screen.blit(txt, (x, y)); y += txt.get_height() + 4
-          if last_click_cv:
-            txt = font.render(f"Click (Frame):   ({last_click_cv[0]}, {last_click_cv[1]})", True, (180, 220, 180))
-            screen.blit(txt, (x, y)); y += txt.get_height() + 8
+        if _has_multiwin():
+          cw, ch = console_win.size
+          panel = pygame.Surface((cw, ch), pygame.SRCALPHA)
+          panel.fill((18, 18, 22, 255))
+          x, y = pad_x, pad_y
 
-        for line in instructions:
-          txt = font.render(line, True, (230, 230, 230))
-          screen.blit(txt, (x, y))
-          y += txt.get_height() + 6
-          if y > SCREEN_H - 8:  # prevent overflow
-            break
+          txt_ids = font.render(ids_text, True, (120, 200, 255))
+          panel.blit(txt_ids, (x, y))
+          y += txt_ids.get_height() + 10
 
-        pygame.display.flip()
-        clock.tick(60)
+          if last_click_pg or last_click_cv:
+            if last_click_pg:
+              t = font.render(f"Click (PyGame):  ({last_click_pg[0]}, {last_click_pg[1]})", True, (180, 220, 180))
+              panel.blit(t, (x, y))
+              y += t.get_height() + 4
+            if last_click_cv:
+              t = font.render(f"Click (Frame):   ({last_click_cv[0]}, {last_click_cv[1]})", True, (180, 220, 180))
+              panel.blit(t, (x, y))
+              y += t.get_height() + 8
+          for line in instructions:
+            t = font.render(line, True, (230, 230, 230)); panel.blit(t, (x, y)); y += t.get_height() + 6
+            if y > ch - 8: 
+              break
+          _blit_texture(console_ren, panel)
+        else:
+          # Single-window bottom panel
+          SCREEN_W, SCREEN_H = screen.get_size()
+          INFO_H = max(140, SCREEN_H // 4)
+          info_y = SCREEN_H - INFO_H
+          panel = pygame.Surface((SCREEN_W, INFO_H), pygame.SRCALPHA)
+          panel.fill((18, 18, 22, 220))
+          screen.blit(panel, (0, info_y))
+          x, y = pad_x, info_y + pad_y
+          
+          txt_ids = font.render(ids_text, True, (120, 200, 255))
+          screen.blit(txt_ids, (x, y))
+          y += txt_ids.get_height() + 10 
 
+          if last_click_pg or last_click_cv:
+            if last_click_pg:
+              t = font.render(f"Click (PyGame):  ({last_click_pg[0]}, {last_click_pg[1]})", True, (180, 220, 180))
+              screen.blit(t, (x, y))
+              y += t.get_height() + 4
+            if last_click_cv:
+              t = font.render(f"Click (Frame):   ({last_click_cv[0]}, {last_click_cv[1]})", True, (180, 220, 180))
+              screen.blit(t, (x, y))
+              y += t.get_height() + 8
+
+          for line in instructions:
+            t = font.render(line, True, (230, 230, 230))
+            screen.blit(t, (x, y))
+            y += t.get_height() + 6
+            if y > SCREEN_H - 8:  # prevent overflow
+              break
+
+          pygame.display.flip()
     finally:
       logger.info("Stopping logging and closing connection to drone.")
       self.drone_logger.stop_logging()

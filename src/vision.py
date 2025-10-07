@@ -158,6 +158,10 @@ class DetectorRT:
     # click-to-delta feature
     self._click_pt = None
     self._click_lock = threading.Lock()
+
+    # normalize click (u, v) in [0,1] x [0,1]; if set, takes precedence
+    self._click_norm = None
+
     # env toggles: 1=enabled, 0=disabled
     self._delta_enabled = bool(int(os.getenv("CLICK_DELTA_ENABLED", "1")))
     self._metric_enabled = bool(int(os.getenv("CLICK_DELTA_METRIC", "1")))
@@ -290,10 +294,22 @@ class DetectorRT:
   def set_click_point(self, x: int, y: int):
     with self._click_lock:
       self._click_pt = (int(x), int(y))
+      self._click_norm = None  # pixel click overrides normalized for this session
 
   def clear_click(self):
     with self._click_lock:
       self._click_pt = None
+      self._click_norm = None
+
+  def set_click_point_normalized(self, u: float, v: float):
+    """
+    Store a normlized click coordinate (u,v) in [0,1], independent of frame size.
+    The actual pixel  is resolved at overlay time using the current frame wxh.
+    """
+    u = float(max(0.0, min(1.0, u)))
+    v = float(max(0.0, min(1.0, v)))
+    with self._click_lock:
+      self._click_norm = (u, v)
 
   def toggle_delta(self, enabled: Optional[bool] = None):
     if enabled is None:
@@ -342,10 +358,27 @@ class DetectorRT:
   def _overlay_click_delta(self, frame: np.ndarray, results: Dict[str, Any]):
     if not self._delta_enabled:
       return
+
+    # REsolve click: normalized will take precedence, else use pixel if present
     with self._click_lock:
-      click = None if self._click_pt is None else tuple(self._click_pt)
-    if click is None:
+      click_px = None
+      if self._click_norm is not None:
+        u, v = self._click_norm
+        h, w = frame.shape[:2]
+        x = int(round(u * (w - 1)))
+        y = int(round(v * (h - 1)))
+        click_px = (x, y)
+      elif self._click_pt is not None:
+        click_px = tuple(self._click_pt)
+      else:
+        click_px = None
+
+    if click_px is None:
       return
+
+    click = click_px
+    click_x, click_y = click
+
     corners = results.get("corners")
     ids = results.get("ids")
     rvecs = results.get("rvecs")
@@ -354,12 +387,11 @@ class DetectorRT:
     chosen = self._nearest_marker_to_point(corners, ids, click)
     if chosen is None:
       # No target; draw click but no delta
-      cv2.drawMarker(frame, click, (200, 200, 255), cv2.MARKER_CROSS, 12, 2)
-      cv2.putText(frame, "No marker", (click[0]+8, click[1]-8), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200,200,255), 1, cv2.LINE_AA)
+      cv2.drawMarker(frame, (click_x, click_y), (200, 200, 255), cv2.MARKER_CROSS, 12, 2)
+      cv2.putText(frame, "No marker", (click_x+8, click_y-8), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200,200,255), 1, cv2.LINE_AA)
       return
 
     idx, mid, cx, cy = chosen
-    click_x, click_y = click
     dx_px = int(round(click_x - cx))
     dy_px = int(round(click_y - cy))
 
@@ -394,9 +426,11 @@ class DetectorRT:
         ray_dir = np.array([[xn],[yn],[1.0]], dtype=np.float64)
         ray_dir = ray_dir / np.linalg.norm(ray_dir)
 
-        denom = float(n.T @ ray_dir)
-        numer = float(n.T @ p0)
-        if abs(denom) > 1e-6:
+        # Per Numpy 1.25+: explicitly extract scalars from 1x1 arrays
+        denom = float((n.T @ ray_dir).item())
+        numer = float((n.T @ p0).item())
+        # Per Numpy 1.25+: near-parallel ray/plane or non-finite values
+        if np.isfinite(denom) and abs(denom) > 1e-6 and np.isfinite(numer):
           s = numer / denom
           Pc = s * ray_dir  # intersection in camera frame
           # Convert to marker frame: X_m = R^T (Pc - tvec)
