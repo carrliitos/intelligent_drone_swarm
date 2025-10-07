@@ -294,21 +294,48 @@ class Command:
 
       rx = (mx - x0) / float(tw)
       ry = (my - y0) / float(th)
-      fx = int(round(rx * fw))
-      fy = int(round(ry * fh))
-      last_click_pg = (mx, my)
-      last_click_cv = (fx, fy)
+      # Store for on-screen debug (normalized + preview pixels)
+      last_click_g = (mx, my)
+      last_click_cv = (int(round(rx * fw)), int(round(ry * fh)))
 
       try:
         if self._vision_click:
-          self._vision_click(fx, fy)
+          # prefer the normalized method if its available
+          det = _get_detector()
+          if det and hasattr(det, "set_click_point_normalized"):
+            det.set_click_point_normalized(rx, ry)
+          else:
+            # Fallback: best-effort pixel mapping against detector/native size if exposed
+            src_w, src_h = fw, fh
+            try:
+              main_mod = sys.modules.get('main') or importlib.import_module('main')
+              with main_mod._latest_frame_lock:
+                src_w, src_h = getattr(main_mod, "_latest_src_wh", (fw, fh))
+                if not src_w or not src_h:
+                  src_w, src_h = fw, fh
+            except Exception as e:
+              pass
+            fx = int(round(rx * src_w))
+            fy = int(round(ry * src_h))
+            self._vision_click(fx, fy)
         else:
           det = _get_detector()
           if det:
-            det.set_click_point(fx, fy)
+            if hasattr(det, "set_click_point_normalized"):
+              det.set_click_point_normalized(rx, ry)
+            else:
+              # Same fallback logic as above
+              src_w, src_h = fw, fh
+              try:
+                main_mod = sys.modules.get('main') or importlib.import_module('main')
+                with main_mod._latest_frame_lock:
+                  src_w, src_h = getattr(main_mod, "_latest_src_wh", (fw, fh))
+              except Exception as e:
+                pass
+              det.set_click_point(int(round(rx * src_w)), int(round(ry * src_h)))
       except Exception as e:
         logger.debug(f"Failed to deliver click to detector: {e}")
-      logger.info(f"Click: pygame=({mx},{my})  frame=({fx},{fy})  rect=({x0},{y0},{tw}x{th}) src=({fw}x{fh})")
+      logger.info(f"Click: pygame=({mx},{my})  norm=({rx:.3f},{ry:.3f}) rect=({x0},{y0},{tw}x{th}) preview=({fw}x{fh})")
 
     try:
       logger.info("Resetting estimators.")
