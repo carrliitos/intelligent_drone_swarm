@@ -155,6 +155,17 @@ class DetectorRT:
     self._fps_counter = helpers._to_int(fps_counter, default=0) or 0
     self._fps_display = helpers._to_float(fps_display, default=0.0) or 0.0
 
+    # click-to-delta feature
+    self._click_pt = None
+    self._click_lock = threading.Lock()
+
+    # normalize click (u, v) in [0,1] x [0,1]; if set, takes precedence
+    self._click_norm = None
+
+    # env toggles: 1=enabled, 0=disabled
+    self._delta_enabled = bool(int(os.getenv("CLICK_DELTA_ENABLED", "1")))
+    self._metric_enabled = bool(int(os.getenv("CLICK_DELTA_METRIC", "1")))
+
     # grid defaults
     self.draw_grid = bool(draw_grid)
     self.grid_step_px = helpers._to_int(grid_step_px, default=50) or 50
@@ -279,6 +290,162 @@ class DetectorRT:
       size = min(w, h) // 20
       cv2.line(frame, (cx - size, cy), (cx + size, cy), self.grid_color, self.grid_thickness + 1, cv2.LINE_AA)
       cv2.line(frame, (cx, cy - size), (cx, cy + size), self.grid_color, self.grid_thickness + 1, cv2.LINE_AA)
+
+  def set_click_point(self, x: int, y: int):
+    with self._click_lock:
+      self._click_pt = (int(x), int(y))
+      self._click_norm = None  # pixel click overrides normalized for this session
+
+  def clear_click(self):
+    with self._click_lock:
+      self._click_pt = None
+      self._click_norm = None
+
+  def set_click_point_normalized(self, u: float, v: float):
+    """
+    Store a normlized click coordinate (u,v) in [0,1], independent of frame size.
+    The actual pixel  is resolved at overlay time using the current frame wxh.
+    """
+    u = float(max(0.0, min(1.0, u)))
+    v = float(max(0.0, min(1.0, v)))
+    with self._click_lock:
+      self._click_norm = (u, v)
+
+  def toggle_delta(self, enabled: Optional[bool] = None):
+    if enabled is None:
+      self._delta_enabled = not self._delta_enabled
+    else:
+      self._delta_enabled = bool(enabled)
+
+  def register_mouse_callback(self):
+    """
+    Register an OpenCV mouse callback on this detector's window title.
+    Note: The caller must ensure a window exists with this exact title.
+    """
+    try:
+      cv2.setMouseCallback(self.window_title, self._on_mouse)
+    except Exception as e:
+      _logfmt("mouse_callback_register_error", level=logging.WARNING, err=str(e))
+
+  def _on_mouse(self, event, x, y, flags, userdata):
+    if event == cv2.EVENT_LBUTTONDOWN:
+      self.set_click_point(x, y)
+      _logfmt("click_capture", x=x, y=y)
+
+  def _nearest_marker_to_point(self, corners, ids, pt):
+    if corners is None or ids is None or len(ids) == 0 or pt is None:
+      return None
+    # Build list of allowed markers
+    pts = []
+    xs, ys = pt
+    for i, c in enumerate(corners):
+      if c is None:
+        continue
+      mid = int(ids[i][0]) if isinstance(ids[i], (list, np.ndarray)) else int(ids[i])
+      if self.allowed_ids is not None and mid not in self.allowed_ids:
+        continue
+      center = np.mean(c[0], axis=0)  # (x,y)
+      dx = float(xs - center[0])
+      dy = float(ys - center[1])
+      dist2 = dx*dx + dy*dy
+      pts.append((dist2, i, mid, float(center[0]), float(center[1])))
+    if not pts:
+      return None
+    pts.sort(key=lambda t: t[0])
+    _, idx, mid, cx, cy = pts[0]
+    return idx, mid, cx, cy
+
+  def _overlay_click_delta(self, frame: np.ndarray, results: Dict[str, Any]):
+    if not self._delta_enabled:
+      return
+
+    # REsolve click: normalized will take precedence, else use pixel if present
+    with self._click_lock:
+      click_px = None
+      if self._click_norm is not None:
+        u, v = self._click_norm
+        h, w = frame.shape[:2]
+        x = int(round(u * (w - 1)))
+        y = int(round(v * (h - 1)))
+        click_px = (x, y)
+      elif self._click_pt is not None:
+        click_px = tuple(self._click_pt)
+      else:
+        click_px = None
+
+    if click_px is None:
+      return
+
+    click = click_px
+    click_x, click_y = click
+
+    corners = results.get("corners")
+    ids = results.get("ids")
+    rvecs = results.get("rvecs")
+    tvecs = results.get("tvecs")
+
+    chosen = self._nearest_marker_to_point(corners, ids, click)
+    if chosen is None:
+      # No target; draw click but no delta
+      cv2.drawMarker(frame, (click_x, click_y), (200, 200, 255), cv2.MARKER_CROSS, 12, 2)
+      cv2.putText(frame, "No marker", (click_x+8, click_y-8), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200,200,255), 1, cv2.LINE_AA)
+      return
+
+    idx, mid, cx, cy = chosen
+    dx_px = int(round(click_x - cx))
+    dy_px = int(round(click_y - cy))
+
+    # Draw visuals
+    cv2.drawMarker(frame, (click_x, click_y), (255, 255, 255), cv2.MARKER_TILTED_CROSS, 14, 2)
+    cv2.circle(frame, (int(round(cx)), int(round(cy))), 4, (0, 255, 255), -1, cv2.LINE_AA)
+    cv2.line(frame, (int(round(cx)), int(round(cy))), (click_x, click_y), (255, 255, 255), 1, cv2.LINE_AA)
+
+    # Build label
+    label = f"ID {mid}  dpx=({dx_px:d},{dy_px:d})"
+    metric_txt = ""
+    if self._metric_enabled and self._do_pose and rvecs is not None and tvecs is not None:
+      try:
+        # camera intrinsics
+        K = self.camera_matrix
+        D = self.dist_coeffs if self.dist_coeffs is not None else np.zeros((5,1))
+
+        # Marker pose for chosen idx (marker -> camera)
+        rvec = rvecs[idx].reshape(3,1)
+        tvec = tvecs[idx].reshape(3,1)
+        R,_ = cv2.Rodrigues(rvec)
+
+        # Plane in camera frame: n·(p - p0) = 0, with p0 = tvec, n = R*[0,0,1]
+        n = R @ np.array([[0.0],[0.0],[1.0]])
+        p0 = tvec
+
+        # Ray from camera origin through pixel
+        uv = np.array([[[float(click_x), float(click_y)]]], dtype=np.float32)
+        undist = cv2.undistortPoints(uv, K, D, P=K)
+        xn = undist[0,0,0]
+        yn = undist[0,0,1]
+        ray_dir = np.array([[xn],[yn],[1.0]], dtype=np.float64)
+        ray_dir = ray_dir / np.linalg.norm(ray_dir)
+
+        # Per Numpy 1.25+: explicitly extract scalars from 1x1 arrays
+        denom = float((n.T @ ray_dir).item())
+        numer = float((n.T @ p0).item())
+        # Per Numpy 1.25+: near-parallel ray/plane or non-finite values
+        if np.isfinite(denom) and abs(denom) > 1e-6 and np.isfinite(numer):
+          s = numer / denom
+          Pc = s * ray_dir  # intersection in camera frame
+          # Convert to marker frame: X_m = R^T (Pc - tvec)
+          Xm = R.T @ (Pc - tvec)
+          dX = float(Xm[0,0])
+          dY = float(Xm[1,0])
+          metric_txt = f"  dM=({dX:.3f}m,{dY:.3f}m)"
+        else:
+          metric_txt = "  dM=(n/a)"
+      except Exception as e:
+        metric_txt = "  dM=(n/a)"
+        _logfmt("metric_delta_error", level=logging.DEBUG, err=str(e))
+
+    cv2.putText(frame, label + metric_txt, (click_x + 8, click_y - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255,255,255), 2, cv2.LINE_AA)
+    _logfmt("click_delta", id=int(mid), x=click_x, y=click_y, cx=f"{cx:.1f}", cy=f"{cy:.1f}", dx_px=dx_px, dy_px=dy_px, metric=metric_txt.strip())
 
   def open(self):
     """
@@ -534,6 +701,7 @@ class DetectorRT:
 
     # Overlays
     self._overlay_grid(frame)
+    self._overlay_click_delta(frame, results)
     self._mark_occupied(frame) # Highlight the occupied cells and then draw grid
     self.last_results = results
 
