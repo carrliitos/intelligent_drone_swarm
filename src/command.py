@@ -294,17 +294,6 @@ class Command:
 
       rx = (mx - x0) / float(tw)
       ry = (my - y0) / float(th)
-
-      # Scale to tdetector/native frame size, not the preview size
-      try:
-        main_mod = sys.modules.get('main') or importlib.import_module('main')
-        with main_mod._latest_frame_lock:
-          src_w, src_h = getattr(main_mod, "_latest_src_wh", (fw, fh))
-          if not src_w or not src_h:
-            src_w, src_h = fw, fh  # fallback
-      except Exception as e:
-         src_w, src_h = fw, fh
-
       fx = int(round(rx * fw))
       fy = int(round(ry * fh))
       last_click_pg = (mx, my)
@@ -319,7 +308,7 @@ class Command:
             det.set_click_point(fx, fy)
       except Exception as e:
         logger.debug(f"Failed to deliver click to detector: {e}")
-      logger.info(f"Click: pygame=({mx},{my})  frame=({fx},{fy})  rect=({x0},{y0},{tw}x{th}) preview=({fw}x{fh}) src=({src_w}x{src_h})")
+      logger.info(f"Click: pygame=({mx},{my})  frame=({fx},{fy})  rect=({x0},{y0},{tw}x{th}) src=({fw}x{fh})")
 
     try:
       logger.info("Resetting estimators.")

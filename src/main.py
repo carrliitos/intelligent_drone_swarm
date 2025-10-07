@@ -44,7 +44,6 @@ RADIO_CHANNELS = {
 _latest_frame_lock = threading.Lock()
 _latest_frame_np = None
 _latest_ids = []
-_latest_src_wh = (0, 0) # (w, h) of the detector frame BEFORE the preview resize
 
 def run(connection_type, use_vision=False, use_control=False, swarm_uris=None):
   cflib.crtp.init_drivers(enable_debug_driver=False)
@@ -114,9 +113,8 @@ def run(connection_type, use_vision=False, use_control=False, swarm_uris=None):
             continue
           last_ok = time.time()
 
-          # record the detector size then preview-resize to keep it light
+          # preview resize to keep it light
           h, w = frame.shape[:2]
-          src_w, src_h = w, h
           scale = min(max_w / w, max_h / h, 1.0)
           if scale < 1.0:
             frame = cv2.resize(frame, (int(w*scale), int(h*scale)))
@@ -124,13 +122,11 @@ def run(connection_type, use_vision=False, use_control=False, swarm_uris=None):
           # Store latest frame (BGR -> RGB) for pygame
           global _latest_frame_np
           global _latest_ids
-          global _latest_src_wh
           rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
           with _latest_frame_lock:
             _latest_frame_np = np.ascontiguousarray(rgb)
             ids = results.get("ids")
             _latest_ids = [] if ids is None else [int(i) for i in ids.flatten()]
-            _latest_src_wh = (src_w, src_h)
 
       vision_thread = threading.Thread(target=_vision_loop, daemon=True)
       vision_thread.start()
