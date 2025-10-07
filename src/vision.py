@@ -426,9 +426,11 @@ class DetectorRT:
         ray_dir = np.array([[xn],[yn],[1.0]], dtype=np.float64)
         ray_dir = ray_dir / np.linalg.norm(ray_dir)
 
-        denom = float(n.T @ ray_dir)
-        numer = float(n.T @ p0)
-        if abs(denom) > 1e-6:
+        # Per Numpy 1.25+: explicitly extract scalars from 1x1 arrays
+        denom = float((n.T @ ray_dir).item())
+        numer = float((n.T @ p0).item())
+        # Per Numpy 1.25+: near-parallel ray/plane or non-finite values
+        if np.isfinite(denom) and abs(denom) > 1e-6 and np.isfinite(numer):
           s = numer / denom
           Pc = s * ray_dir  # intersection in camera frame
           # Convert to marker frame: X_m = R^T (Pc - tvec)
