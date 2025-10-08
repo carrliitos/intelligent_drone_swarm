@@ -8,6 +8,7 @@ import pygame
 import threading
 import numpy as np
 import importlib
+import warnings
 from pathlib import Path
 from collections import deque
 from dotenv import load_dotenv
@@ -44,6 +45,24 @@ except Exception:
 def _has_multiwin():
   return MULTIWIN
 
+def deprecated(reason: str = ""):
+  """
+  Usage:
+    @deprecated("use _map_click() + self._vision_click instead")
+  """
+  def decorator(func):
+    def wrapper(*args, **kwargs):
+      warnings.warn(
+        f"[DEPRECATED] {func.__name__} is deprecated. {reason}",
+        category=DeprecationWarning,
+        stacklevel=2
+      )
+      return func(*args, **kwargs)
+    wrapper.__name__ = func.__name__
+    wrapper.__doc__ = func.__doc__
+    return wrapper
+  return decorator
+
 class Command:
   def __init__(self, 
                drone: DroneConnection, 
@@ -73,8 +92,8 @@ class Command:
     self._l_was_down = False      # for 'L' edge detection
     self._g_was_down = False      # for 'G' edge detection (enter manual)
     self._s_was_down = False      # for 'S' edge (enter swarm manual)
-    self.speed_xy = 1.0           # m/s
-    self.speed_z  = 1.0           # m/s
+    self.speed_xy = 0.25          # m/s
+    self.speed_z  = 0.25          # m/s
     self.yaw_rate = 90.0          # deg/s
     self.takeoff_alt = takeoff_alt # m
 
@@ -283,7 +302,7 @@ class Command:
 
     logger.info("In pygame function")
     pygame.init()
-    font = pygame.font.SysFont("monospace", 12)
+    font = pygame.font.SysFont("monospace", 14)
     video_size = (960, 520)
     console_size = (520, 600)
 
@@ -307,6 +326,41 @@ class Command:
     last_draw = { "x0": 0, "y0": 0, "tw": 0, "th": 0, "fw": 0, "fh": 0 }
     last_click_pg = None   # (mx,my) in PyGame window coords
     last_click_cv = None   # (fx,fy) in OpenCV frame coords
+
+    # helper: map PyFame click -> detector frame (fx, fy)
+    def _map_click(mx: int, my: int):
+      """
+      Return (fx, fy) in detector source pixels, or None if outside video.
+      """
+      x0, y0 = last_draw["x0"], last_draw["y0"]
+      tw, th = last_draw["tw"], last_draw["th"]
+
+      if tw <= 0 or th <= 0:
+        return None
+
+      # only count clicks inside the drawn video rectangle
+      if not (x0 <= mx < x0 + tw and y0 <= my < y0 + th):
+        return None
+
+      # Normalize within the letterboxed video rectangle
+      rx = (mx - x0) / float(tw)
+      ry = (my - y0) / float(th)
+      rx = min(max(rx, 0.0), 1.0)
+      ry = min(max(ry, 0.0), 1.0)
+
+      try:
+        main_mod = sys.modules.get('main') or importlib.import_module('main')
+        with main_mod._latest_frame_lock:
+          src_wh = getattr(main_mod, "_latest_src_wh", None)
+      except Exception:
+        src_wh = None
+
+      if not src_wh:
+        return None
+
+      fw, fh = src_wh  # (width, height) in detector.read() frame
+
+      return (int(round(rx * (fw - 1))), int(round(ry * (fh - 1))))
 
     # Helper for creating textures from surfaces in _sdl2 mode
     def _blit_texture(ren: "Renderer", surf: "pygame.Surface"):
@@ -344,7 +398,12 @@ class Command:
       import importlib, sys
       return getattr(sys.modules.get('main') or importlib.import_module('main'), "detector", None)
 
+    @deprecated("Use _map_click() + self._vision_click instead.")
     def _send_click_to_detector(mx, my):
+      """
+      [DEPRECATED] Legacy click mapping. 
+      Replaced by _map_click() for pixel-accurate coordinate translation.
+      """
       nonlocal last_click_pg, last_click_cv
 
       x0, y0, tw, th, fw, fh = (last_draw["x0"], last_draw["y0"], last_draw["tw"], last_draw["th"], last_draw["fw"], last_draw["fh"])
@@ -416,10 +475,14 @@ class Command:
             if _has_multiwin():
               # MOUSEBUTTONDOWN carries window position already local
               mx, my = event.pos
-              _send_click_to_detector(mx, my)
-            else:
-              mx, my = event.pos
-              _send_click_to_detector(mx, my)
+              mapped = _map_click(mx, my)
+              if mapped and self._vision_click:
+                fx, fy = mapped
+                # Forward to detector (will draw crosshair + delta on next frame)
+                try:
+                  self._vision_click(fx, fy)
+                except Exception as e:
+                  logger.debug(f"on_click failed: {e}")
           if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_BACKSPACE:
               done = True
