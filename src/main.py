@@ -44,6 +44,7 @@ RADIO_CHANNELS = {
 _latest_frame_lock = threading.Lock()
 _latest_frame_np = None
 _latest_ids = []
+_latest_src_wh = None # (width, height) of detector/ frame
 
 def run(connection_type, use_vision=False, use_control=False, swarm_uris=None):
   cflib.crtp.init_drivers(enable_debug_driver=False)
@@ -112,6 +113,12 @@ def run(connection_type, use_vision=False, use_control=False, swarm_uris=None):
             time.sleep(0.01)
             continue
           last_ok = time.time()
+
+          # save original source size (detector frame)
+          h, w = frame.shape[:2]
+          global _latest_src_wh
+          with _latest_frame_lock:
+            _latest_src_wh = (w, h)
 
           # preview resize to keep it light
           h, w = frame.shape[:2]
