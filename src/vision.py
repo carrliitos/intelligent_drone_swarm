@@ -378,10 +378,6 @@ class DetectorRT:
 
     click = click_px
     click_x, click_y = click
-    # Raw click coordinates printed at the cursor
-    cv2.putText(frame, f"Click=({click_x},{click_y})",
-                (click_x + 8, click_y + 16),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,255,255), 1, cv2.LINE_AA)
 
     corners = results.get("corners")
     ids = results.get("ids")
@@ -533,11 +529,6 @@ class DetectorRT:
       fcc_text = "".join([chr((fourcc >> (8*i)) & 0xFF) for i in range(4)]).strip()
       logger.info(f"Camera opened at {got_w}x{got_h} @ {got_fps:.1f} FPS ({fcc_text or 'RAW'})")
       _logfmt("camera_open_ok", got_w=got_w, got_h=got_h, got_fps=got_fps, fourcc=fcc_text or "RAW")
-
-      # Create a real OpenCV you can click in
-      cv2.namedWindow(self.window_title, cv2.WINDOW_NORMAL)
-      cv2.resizeWindow(self.window_title, got_w, got_h)
-      self.register_mouse_callback()
 
       DetectorRT._is_open = True
 
@@ -713,10 +704,6 @@ class DetectorRT:
     self._overlay_click_delta(frame, results)
     self._mark_occupied(frame) # Highlight the occupied cells and then draw grid
     self.last_results = results
-
-    # show annotated frame in OpenCV window and pump events and ensure the mouse callback gets delivered each frame.
-    cv2.imshow(self.window_title, frame)
-    cv2.waitKey(1)
 
     with self._latest_lock:
       self._latest_frame = frame.copy()   # small cost; safe for readers
