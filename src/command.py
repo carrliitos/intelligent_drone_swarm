@@ -8,6 +8,7 @@ import pygame
 import threading
 import numpy as np
 import importlib
+import warnings
 from pathlib import Path
 from collections import deque
 from dotenv import load_dotenv
@@ -43,6 +44,24 @@ except Exception:
 
 def _has_multiwin():
   return MULTIWIN
+
+def deprecated(reason: str = ""):
+  """
+  Usage:
+    @deprecated("use _map_click() + self._vision_click instead")
+  """
+  def decorator(func):
+    def wrapper(*args, **kwargs):
+      warnings.warn(
+        f"[DEPRECATED] {func.__name__} is deprecated. {reason}",
+        category=DeprecationWarning,
+        stacklevel=2
+      )
+      return func(*args, **kwargs)
+    wrapper.__name__ = func.__name__
+    wrapper.__doc__ = func.__doc__
+    return wrapper
+  return decorator
 
 class Command:
   def __init__(self, 
@@ -378,6 +397,65 @@ class Command:
     def _get_detector():
       import importlib, sys
       return getattr(sys.modules.get('main') or importlib.import_module('main'), "detector", None)
+
+    @deprecated("Use _map_click() + self._vision_click instead.")
+    def _send_click_to_detector(mx, my):
+      """
+      [DEPRECATED] Legacy click mapping. 
+      Replaced by _map_click() for pixel-accurate coordinate translation.
+      """
+      nonlocal last_click_pg, last_click_cv
+
+      x0, y0, tw, th, fw, fh = (last_draw["x0"], last_draw["y0"], last_draw["tw"], last_draw["th"], last_draw["fw"], last_draw["fh"])
+      if tw <= 0 or th <= 0 or fw <= 0 or fh <= 0:
+        return
+      if not (x0 <= mx < x0 + tw and y0 <= my < y0 + th):
+        return
+
+      rx = (mx - x0) / float(tw)
+      ry = (my - y0) / float(th)
+      # Store for on-screen debug (normalized + preview pixels)
+      last_click_g = (mx, my)
+      last_click_cv = (int(round(rx * fw)), int(round(ry * fh)))
+
+      try:
+        if self._vision_click:
+          # prefer the normalized method if its available
+          det = _get_detector()
+          if det and hasattr(det, "set_click_point_normalized"):
+            det.set_click_point_normalized(rx, ry)
+          else:
+            # Fallback: best-effort pixel mapping against detector/native size if exposed
+            src_w, src_h = fw, fh
+            try:
+              main_mod = sys.modules.get('main') or importlib.import_module('main')
+              with main_mod._latest_frame_lock:
+                src_w, src_h = getattr(main_mod, "_latest_src_wh", (fw, fh))
+                if not src_w or not src_h:
+                  src_w, src_h = fw, fh
+            except Exception as e:
+              pass
+            fx = int(round(rx * src_w))
+            fy = int(round(ry * src_h))
+            self._vision_click(fx, fy)
+        else:
+          det = _get_detector()
+          if det:
+            if hasattr(det, "set_click_point_normalized"):
+              det.set_click_point_normalized(rx, ry)
+            else:
+              # Same fallback logic as above
+              src_w, src_h = fw, fh
+              try:
+                main_mod = sys.modules.get('main') or importlib.import_module('main')
+                with main_mod._latest_frame_lock:
+                  src_w, src_h = getattr(main_mod, "_latest_src_wh", (fw, fh))
+              except Exception as e:
+                pass
+              det.set_click_point(int(round(rx * src_w)), int(round(ry * src_h)))
+      except Exception as e:
+        logger.debug(f"Failed to deliver click to detector: {e}")
+      logger.info(f"Click: pygame=({mx},{my})  norm=({rx:.3f},{ry:.3f}) rect=({x0},{y0},{tw}x{th}) preview=({fw}x{fh})")
 
     try:
       logger.info("Resetting estimators.")
