@@ -29,6 +29,7 @@ import vision
 
 root = Path(context.get_context(__file__)).resolve()
 logs = root / "logs"
+data = root / "data"
 logs.mkdir(parents=True, exist_ok=True)
 name = Path(__file__).stem
 stamp = _dt.datetime.now(_dt.timezone.utc).strftime("%Y%m%d_%H%M%S")
@@ -139,7 +140,7 @@ class Command:
     self.wp_hud = helpers._b(os.getenv("WAYPOINT_HUD"), default=True)
     self.wp_Z = helpers._f(os.getenv("WAYPOINT_Z"), default=0.0)
     override = (os.getenv("WAYPOINT_LOG_FILE") or "").strip()
-    self.wp_path = Path(override) if override else (logs / f"waypoints-{stamp}.jsonl")
+    self.wp_path = Path(override) if override else (data / f"waypoints-{stamp}.jsonl")
 
     # waypoints (thread-safe)
     self._waypoints: list[Waypoint] = []
