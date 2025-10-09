@@ -31,7 +31,7 @@ root = Path(context.get_context(__file__)).resolve()
 logs = root / "logs"
 logs.mkdir(parents=True, exist_ok=True)
 name = Path(__file__).stem
-stamp = _dt.datetime.now(_dt.timezone.utc).strftime("%Y%m%d")
+stamp = _dt.datetime.now(_dt.timezone.utc).strftime("%Y%m%d_%H%M%S")
 log_file = logs / f"{name}.log"
 
 logger = _logger.setup_logger(
