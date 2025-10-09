@@ -14,7 +14,6 @@ dependencies = [
   "libusb-package",
   "numpy",
   "opencv-contrib-python",
-  "opencv-python",
   "packaging",
   "scipy",
   "watchdog",
