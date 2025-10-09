@@ -256,7 +256,8 @@ def cli():
     connection_type = RADIO_CHANNELS[first]
     use_vision = "vision" in extras
     use_control = "control" in extras and use_vision
-    logger.info(f"Swarm URIs: {swarm_uris} | vision={use_vision} control={use_control}")
+    use_waypoint = "waypoint" in extras and use_vision
+    logger.info(f"Swarm URIs: {swarm_uris} | vision={use_vision} control={use_control} waypoint={use_waypoint}")
     run(connection_type, use_vision=use_vision, use_control=use_control, swarm_uris=swarm_uris)
     sys.exit(0)
   else:
@@ -277,7 +278,7 @@ def cli():
   else:
     os.environ["WAYPOINT_LOGGING"] = WAYPOINT_ENV_DEFAULT
 
-  logger.info(f"Using connection: {connection_type}  | vision={use_vision} control={use_control}")
+  logger.info(f"Using connection: {connection_type} | vision={use_vision} control={use_control} waypoint={waypoint_flag}")
   run(connection_type, use_vision=use_vision, use_control=use_control)
 
 if __name__ == '__main__':
