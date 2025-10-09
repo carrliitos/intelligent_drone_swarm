@@ -9,8 +9,11 @@ import threading
 import numpy as np
 import importlib
 import warnings
+import json
+import datetime as _dt
 from pathlib import Path
 from collections import deque
+from dataclasses import dataclass, asdict
 from dotenv import load_dotenv
 load_dotenv(dotenv_path="config/.env") 
 
@@ -18,18 +21,23 @@ from cflib.crazyflie.log import LogConfig
 from cflib.crazyflie.syncLogger import SyncLogger
 from cflib.positioning.motion_commander import MotionCommander
 
-from utils import logger, context
+from utils import context, helpers, logger as _logger
 from drone_connection import DroneConnection
 from drone_log import DroneLogs
 from swarm_command import SwarmCommand
 import vision
 
-directory = context.get_context(os.path.abspath(__file__))
-logger_file_name = Path(directory).stem
-logger_name = Path(__file__).stem
-logger = logger.setup_logger(
-  logger_name=logger_name, 
-  log_file=f"{directory}/logs/{logger_file_name}.log", 
+root = Path(context.get_context(__file__)).resolve()
+logs = root / "logs"
+data = root / "data"
+logs.mkdir(parents=True, exist_ok=True)
+name = Path(__file__).stem
+stamp = _dt.datetime.now(_dt.timezone.utc).strftime("%Y%m%d_%H%M%S")
+log_file = logs / f"{name}.log"
+
+logger = _logger.setup_logger(
+  logger_name=name,
+  log_file=str(log_file),
   log_level=os.getenv("LOG_LEVEL")
 )
 
@@ -44,6 +52,23 @@ except Exception:
 
 def _has_multiwin():
   return MULTIWIN
+
+@dataclass
+class Waypoint:
+  ts: str
+  mx: int
+  my: int
+  fx: int | None = None
+  fy: int | None = None
+  X: float | None = None
+  Y: float | None = None
+  Z: float | None = None
+  frame_idx: int | None = None
+
+def _utc_iso():
+  # ISO8601 with milliseconds and Z
+  now = _dt.datetime.utcnow().replace(tzinfo=_dt.timezone.utc)
+  return now.isoformat(timespec="milliseconds").replace("+00:00","Z")
 
 def deprecated(reason: str = ""):
   """
@@ -110,6 +135,18 @@ class Command:
     self._vision_toggle = None
     self._vision_clear = None
 
+    # Waypoints config (env/CLI)
+    self.wp_enabled = helpers._b(os.getenv("WAYPOINT_LOGGING"), default=True)
+    self.wp_hud = helpers._b(os.getenv("WAYPOINT_HUD"), default=True)
+    self.wp_Z = helpers._f(os.getenv("WAYPOINT_Z"), default=0.0)
+    override = (os.getenv("WAYPOINT_LOG_FILE") or "").strip()
+    self.wp_path = Path(override) if override else (data / f"waypoints-{stamp}.jsonl")
+
+    # waypoints (thread-safe)
+    self._waypoints: list[Waypoint] = []
+    self._wp_lock = threading.Lock()
+    self._latest_frame_idx = 0
+
   @staticmethod
   def _sat(x, lo, hi):
     return max(lo, min(hi, x))
@@ -118,6 +155,136 @@ class Command:
   def _wrap_pi(a):
     # wrap to [-pi, pi)
     return (a + math.pi) % (2.0 * math.pi) - math.pi
+
+  def _get_detector(self):
+    import importlib, sys
+    return getattr(sys.modules.get('main') or importlib.import_module('main'), "detector", None)
+
+  def _append_waypoint(self, mx: int, my: int, fx: int | None, fy: int | None):
+    """
+    Create a Waypoint entry, attempt pixel -> marker-plane projection using the 
+    Detector's pose estimate, and append the result to memory and the JSONL log.
+
+    Parameters
+    ----------
+    mx : int
+        The x-coordinate of the mouse click in the PyGame window (in screen pixels).
+    my : int
+        The y-coordinate of the mouse click in the PyGame window (in screen pixels).
+    fx : int | None
+        The corresponding x-coordinate in the detector’s native OpenCV frame, 
+        derived from (mx, my) via viewport mapping. None if the click occurred 
+        outside the video region or could not be mapped.
+    fy : int | None
+        The corresponding y-coordinate in the detector’s native OpenCV frame, 
+        derived from (mx, my). None if unavailable.
+
+    Notes
+    -----
+    - The function uses `DetectorRT.pixel_to_marker_xy()` to project the pixel 
+      (fx, fy) into the Z=0 plane of the nearest detected ArUco marker.
+    - The returned (X, Y) are expressed in that marker’s local coordinate frame
+      in meters, not in a global world frame.
+    - Z is assigned from the configured constant `WAYPOINT_Z`, typically the 
+      desired flight altitude in meters.
+    - The resulting waypoint is stored in memory (`self._waypoints`) and appended 
+      as a JSONL record to `self.wp_path`.
+    - If the click cannot be projected (e.g., no pose, no nearby marker), X/Y/Z 
+      remain None and a `_why_null_world` reason is logged.
+    """
+    frame_idx = None
+
+    try:
+      main_mod = sys.modules.get('main') or importlib.import_module('main')
+
+      with main_mod._latest_frame_lock:
+        frame_idx = getattr(main_mod, "_latest_frame_idx", None)
+    except Exception:
+      frame_idx = None
+
+    X = Y = Z = None
+    reason = None
+    try:
+      if fx is None or fy is None:
+        reason = "no_frame_coords"
+      else:
+        det = self._get_detector()
+
+        if not det:
+          reason = "no_detector"
+          logger.warning(reason)
+        elif not getattr(det, "_do_pose", False):
+          reason = "pose_disabled"
+          logger.warning(reason)
+        else:
+          res = det.latest()[1] if det else None
+
+          if not res or res.get("rvecs") is None or res.get("tvecs") is None:
+            reason = "no_pose_in_results"
+            logger.warning(reason)
+          else:
+            out = det.pixel_to_marker_xy(fx, fy, res)
+
+            if out is None:
+              reason = "no_near_marker"
+              logger.warning(reason)
+            else:
+              _, X, Y = out
+              Z = float(self.wp_Z)
+              reason = None
+    except Exception:
+      # Soft-fail: keep None world coords
+      pass
+
+    wp = Waypoint(ts=_utc_iso(),
+                  mx=int(mx), my=int(my),
+                  fx=(int(fx) if fx is not None else None),
+                  fy=(int(fy) if fy is not None else None),
+                  X=X, 
+                  Y=Y, 
+                  Z=Z,
+                  frame_idx=(int(frame_idx) if frame_idx is not None else None))
+
+    logger.info(f"Selected Waypoints={wp}")
+
+    with self._wp_lock:
+      self._waypoints.append(wp)
+
+    if self.wp_enabled:
+      try:
+        rec = asdict(wp)
+        if reason is not None:
+          rec["_why_null_world"] = reason
+        with open(self.wp_path, "a", encoding="utf-8") as f:
+          f.write(json.dumps(rec, separators=(",", ":")) + "\n")
+      except Exception as e:
+        logger.warning(f"Waypoint log write failed: {e}")
+
+  def _draw_waypoints_on_video(self, surface: "pygame.Surface", last_draw: dict, color=(255,200,80)):
+    """
+    Draw small markers + indices for each waypoint onto the already-scaled video surface.
+    last_draw contains mapping info for scaling preview pixels -> target rect.
+    """
+    if not self.wp_hud:
+      return
+
+    tw, th, fw, fh = last_draw["tw"], last_draw["th"], last_draw["fw"], last_draw["fh"]
+
+    if tw <= 0 or th <= 0 or fw <= 0 or fh <= 0:
+      return
+
+    with self._wp_lock:
+      for idx, wp in enumerate(self._waypoints, start=1):
+        if wp.fx is None or wp.fy is None:  # need frame coords for overlay
+          continue
+
+        sx = int(round((wp.fx / max(1, fw-1)) * tw))
+        sy = int(round((wp.fy / max(1, fh-1)) * th))
+        pygame.draw.circle(surface, color, (sx, sy), max(2, th // 200))
+
+        # tiny index label
+        lbl = pygame.font.SysFont("monospace", 12).render(str(idx), True, color)
+        surface.blit(lbl, (sx + 4, sy + 2))
 
   def set_vision_hooks(self, on_click=None, on_toggle=None, on_clear=None):
     """
@@ -194,7 +361,7 @@ class Command:
 
     if not ok:
       logger.error("Estimators not stable. Exiting...")
-      time.sleep(1.0)
+      time.sleep(5.0)
       sys.exit()
 
   def _hover(self):
@@ -394,10 +561,6 @@ class Command:
         except Exception:
           pass
 
-    def _get_detector():
-      import importlib, sys
-      return getattr(sys.modules.get('main') or importlib.import_module('main'), "detector", None)
-
     @deprecated("Use _map_click() + self._vision_click instead.")
     def _send_click_to_detector(mx, my):
       """
@@ -415,13 +578,13 @@ class Command:
       rx = (mx - x0) / float(tw)
       ry = (my - y0) / float(th)
       # Store for on-screen debug (normalized + preview pixels)
-      last_click_g = (mx, my)
+      last_click_pg = (mx, my)
       last_click_cv = (int(round(rx * fw)), int(round(ry * fh)))
 
       try:
         if self._vision_click:
           # prefer the normalized method if its available
-          det = _get_detector()
+          det = self._get_detector()
           if det and hasattr(det, "set_click_point_normalized"):
             det.set_click_point_normalized(rx, ry)
           else:
@@ -439,7 +602,7 @@ class Command:
             fy = int(round(ry * src_h))
             self._vision_click(fx, fy)
         else:
-          det = _get_detector()
+          det = self._get_detector()
           if det:
             if hasattr(det, "set_click_point_normalized"):
               det.set_click_point_normalized(rx, ry)
@@ -462,7 +625,7 @@ class Command:
       self._reset_estimator()
       time.sleep(1.0)
       self.drone_logger.start_logging()
-      logger.info("GO!!!!\n")
+      logger.info("GO!!!!")
 
       while not done:
         for event in pygame.event.get():
@@ -483,6 +646,15 @@ class Command:
                   self._vision_click(fx, fy)
                 except Exception as e:
                   logger.debug(f"on_click failed: {e}")
+
+                # Log waypoint (no command dispatch)
+                try:
+                  self._append_waypoint(mx, my, fx, fy)
+                except Exception as e:
+                  logger.debug(f"waypoint append failed: {e}")
+              else:
+                logger.debug("Click ignored (outside video).")
+
           if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_BACKSPACE:
               done = True
@@ -494,7 +666,7 @@ class Command:
                 if self._vision_toggle:
                   self._vision_toggle()
                 else:
-                  det = _get_detector()
+                  det = self._get_detector()
                   if det:
                     det.toggle_delta()
                 logger.info("Toggled click-delta overlay (V).")
@@ -505,7 +677,7 @@ class Command:
                 if self._vision_clear:
                   self._vision_clear()
                 else:
-                  det = _get_detector()
+                  det = self._get_detector()
                   if det:
                     det.clear_click()
                 logger.info("Cleared click-delta point (C).")
@@ -645,6 +817,11 @@ class Command:
             canvas = pygame.Surface((vw, vh))
             canvas.fill((0,0,0))
             canvas.blit(surf, (x0, y0))
+
+            # Draw waypoint markers onto the video area
+            if self.wp_hud:
+              self._draw_waypoints_on_video(surf, last_draw)
+
             _blit_texture(video_ren, canvas)
 
             # Save for click mapping
@@ -673,6 +850,11 @@ class Command:
             x0 = (VIDEO_W - tw) // 2
             y0 = (VIDEO_H - th) // 2
             screen.blit(surf, (x0, y0))
+
+            # overlay markers directly on scaled video region
+            if self.wp_hud:
+              self._draw_waypoints_on_video(surf, last_draw)
+
             last_draw.update({"x0": x0, "y0": y0, "tw": tw, "th": th, "fw": fw, "fh": fh})
 
         instructions = [
@@ -724,6 +906,18 @@ class Command:
               t = font.render(f"Click (Frame):   ({last_click_cv[0]}, {last_click_cv[1]})", True, (180, 220, 180))
               panel.blit(t, (x, y))
               y += t.get_height() + 8
+
+          # Simple HUD count
+          try:
+            with self._wp_lock:
+              n_wp = len(self._waypoints)
+
+            t = font.render(f"Waypoints: {n_wp}", True, (230, 230, 230))
+            panel.blit(t, (x, y))
+            y += t.get_height() + 8
+          except Exception: 
+            pass
+
           for line in instructions:
             t = font.render(line, True, (230, 230, 230)); panel.blit(t, (x, y)); y += t.get_height() + 6
             if y > ch - 8: 
@@ -752,6 +946,17 @@ class Command:
               t = font.render(f"Click (Frame):   ({last_click_cv[0]}, {last_click_cv[1]})", True, (180, 220, 180))
               screen.blit(t, (x, y))
               y += t.get_height() + 8
+
+          # Simple HUD count
+          try:
+            with self._wp_lock:
+              n_wp = len(self._waypoints)
+
+            t = font.render(f"Waypoints: {n_wp}", True, (230, 230, 230))
+            screen.blit(t, (x, y))
+            y += t.get_height() + 8
+          except Exception: 
+            pass
 
           for line in instructions:
             t = font.render(line, True, (230, 230, 230))
