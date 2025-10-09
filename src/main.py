@@ -34,6 +34,7 @@ logger = logger.setup_logger(
   log_level=os.getenv("LOG_LEVEL")
 )
 
+WAYPOINT_ENV_DEFAULT = os.getenv("WAYPOINT_LOGGING", "0")
 UDP = os.getenv("UDP")
 RADIO_CHANNELS = {
   "7": os.getenv("RADIO_CHANNEL_7"),
@@ -45,6 +46,7 @@ _latest_frame_lock = threading.Lock()
 _latest_frame_np = None
 _latest_ids = []
 _latest_src_wh = None # (width, height) of detector/ frame
+_latest_frame_idx = 0
 
 def run(connection_type, use_vision=False, use_control=False, swarm_uris=None):
   cflib.crtp.init_drivers(enable_debug_driver=False)
@@ -105,6 +107,9 @@ def run(connection_type, use_vision=False, use_control=False, swarm_uris=None):
       def _vision_loop():
         max_w, max_h = 960, 540
         last_ok = time.time()
+
+        global _latest_frame_idx
+
         while not stop_vision.is_set():
           frame, results = detector.read()
           if frame is None:
@@ -118,6 +123,7 @@ def run(connection_type, use_vision=False, use_control=False, swarm_uris=None):
           h, w = frame.shape[:2]
           global _latest_src_wh
           with _latest_frame_lock:
+            _latest_frame_idx = (_latest_frame_idx + 1) % 2_000_000_000 # large wraparound counter; avoids unbounded growth
             _latest_src_wh = (w, h)
 
           # preview resize to keep it light
@@ -196,6 +202,7 @@ def print_usage():
   print("Notes:")
   print("  - 'vision' starts the ArUco webcam preview thread")
   print("  - 'control' starts the IBVS control loop (requires 'vision')")
+  print("  - 'waypoint' enables click -> waypoint logging HUD/JSONL")
   sys.exit(1)
 
 def cli():
@@ -207,6 +214,7 @@ def cli():
   connection_type = None
   use_vision = False
   use_control = False
+  waypoint_flag = False
 
   if args[0] == "udp":
     connection_type = UDP
@@ -256,10 +264,17 @@ def cli():
 
   use_vision = "vision" in extras
   use_control = "control" in extras
+  waypoint_flag = "waypoint" in extras
 
   if use_control and not use_vision:
     logger.warning("`control` requested without `vision`; disabling control.")
     use_control = False
+
+  # Allow CLI to force-enable waypoint logging
+  if waypoint_flag:
+    os.environ["WAYPOINT_LOGGING"] = "1"
+  else:
+    os.environ["WAYPOINT_LOGGING"] = WAYPOINT_ENV_DEFAULT
 
   logger.info(f"Using connection: {connection_type}  | vision={use_vision} control={use_control}")
   run(connection_type, use_vision=use_vision, use_control=use_control)
