@@ -770,6 +770,66 @@ class DetectorRT:
       "dist_m": dists,
     }
 
+  def pixel_to_marker_xy(self, x: int, y: int, results: Optional[Dict[str, Any]] = None) -> Optional[Tuple[int, float, float]]:
+    """
+    Project pixel (x,y) to the Z=0 plane of the nearest detected marker and
+    return (marker_id, X, Y) in that marker's local frame. Requires pose.
+    Returns None if intrinsics/pose are unavailable or no suitable marker.
+    """
+    if self.camera_matrix is None:
+      return None
+
+    res = results if results is not None else self.last_results
+
+    if not res:
+      return None
+
+    corners = res.get("corners")
+    ids = res.get("ids")
+    rvecs = res.get("rvecs")
+    tvecs = res.get("tvecs")
+
+    if corners is None or ids is None or rvecs is None or tvecs is None:
+      return None
+
+    chosen = self._nearest_marker_to_point(corners, ids, (x, y))
+
+    if chosen is None:
+      return None
+
+    idx, mid, cx, cy = chosen
+
+    try:
+      # intrinsics
+      K = self.camera_matrix
+      D = self.dist_coeffs if self.dist_coeffs is not None else np.zeros((5,1))
+
+      # marker pose (marker -> camera)
+      rvec = rvecs[idx].reshape(3,1)
+      tvec = tvecs[idx].reshape(3,1)
+      R,_ = cv2.Rodrigues(rvec)
+      n = R @ np.array([[0.0],[0.0],[1.0]])  # marker plane normal in camera frame
+      p0 = tvec                              # a point on the plane (marker origin)
+
+      uv = np.array([[[float(x), float(y)]]], dtype=np.float32)
+      und = cv2.undistortPoints(uv, K, D, P=K)
+      ray = np.array([[und[0,0,0]],[und[0,0,1]],[1.0]], dtype=np.float64)
+      ray = ray / np.linalg.norm(ray)
+      denom = float((n.T @ ray).item())
+      numer = float((n.T @ p0).item())
+
+      if not (np.isfinite(denom) and abs(denom) > 1e-6 and np.isfinite(numer)):
+        return None
+
+      s = numer / denom
+      Pc = s * ray           # intersection in camera frame
+      Xm = R.T @ (Pc - tvec) # to marker frame
+
+      return int(mid), float(Xm[0,0]), float(Xm[1,0])
+    except Exception as e:
+      logger.error(f"No pixel_to_marker_xy: {e}")
+      return None
+
 def primary_target(results, frame_shape):
   """
   Return (cx, cy, area_px, W, H) of the first detected marker, or None.
