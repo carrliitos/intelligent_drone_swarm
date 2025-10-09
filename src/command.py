@@ -156,9 +156,41 @@ class Command:
     # wrap to [-pi, pi)
     return (a + math.pi) % (2.0 * math.pi) - math.pi
 
+  def _get_detector(self):
+    import importlib, sys
+    return getattr(sys.modules.get('main') or importlib.import_module('main'), "detector", None)
+
   def _append_waypoint(self, mx: int, my: int, fx: int | None, fy: int | None):
     """
-    Create Waypoint, attempt pixel->world XY via Detector pose, append to memory and JSONL.
+    Create a Waypoint entry, attempt pixel -> marker-plane projection using the 
+    Detector's pose estimate, and append the result to memory and the JSONL log.
+
+    Parameters
+    ----------
+    mx : int
+        The x-coordinate of the mouse click in the PyGame window (in screen pixels).
+    my : int
+        The y-coordinate of the mouse click in the PyGame window (in screen pixels).
+    fx : int | None
+        The corresponding x-coordinate in the detector’s native OpenCV frame, 
+        derived from (mx, my) via viewport mapping. None if the click occurred 
+        outside the video region or could not be mapped.
+    fy : int | None
+        The corresponding y-coordinate in the detector’s native OpenCV frame, 
+        derived from (mx, my). None if unavailable.
+
+    Notes
+    -----
+    - The function uses `DetectorRT.pixel_to_marker_xy()` to project the pixel 
+      (fx, fy) into the Z=0 plane of the nearest detected ArUco marker.
+    - The returned (X, Y) are expressed in that marker’s local coordinate frame
+      in meters, not in a global world frame.
+    - Z is assigned from the configured constant `WAYPOINT_Z`, typically the 
+      desired flight altitude in meters.
+    - The resulting waypoint is stored in memory (`self._waypoints`) and appended 
+      as a JSONL record to `self.wp_path`.
+    - If the click cannot be projected (e.g., no pose, no nearby marker), X/Y/Z 
+      remain None and a `_why_null_world` reason is logged.
     """
     frame_idx = None
 
@@ -529,10 +561,6 @@ class Command:
         except Exception:
           pass
 
-    def _get_detector():
-      import importlib, sys
-      return getattr(sys.modules.get('main') or importlib.import_module('main'), "detector", None)
-
     @deprecated("Use _map_click() + self._vision_click instead.")
     def _send_click_to_detector(mx, my):
       """
@@ -550,13 +578,13 @@ class Command:
       rx = (mx - x0) / float(tw)
       ry = (my - y0) / float(th)
       # Store for on-screen debug (normalized + preview pixels)
-      last_click_g = (mx, my)
+      last_click_pg = (mx, my)
       last_click_cv = (int(round(rx * fw)), int(round(ry * fh)))
 
       try:
         if self._vision_click:
           # prefer the normalized method if its available
-          det = _get_detector()
+          det = self._get_detector()
           if det and hasattr(det, "set_click_point_normalized"):
             det.set_click_point_normalized(rx, ry)
           else:
@@ -574,7 +602,7 @@ class Command:
             fy = int(round(ry * src_h))
             self._vision_click(fx, fy)
         else:
-          det = _get_detector()
+          det = self._get_detector()
           if det:
             if hasattr(det, "set_click_point_normalized"):
               det.set_click_point_normalized(rx, ry)
@@ -638,7 +666,7 @@ class Command:
                 if self._vision_toggle:
                   self._vision_toggle()
                 else:
-                  det = _get_detector()
+                  det = self._get_detector()
                   if det:
                     det.toggle_delta()
                 logger.info("Toggled click-delta overlay (V).")
@@ -649,7 +677,7 @@ class Command:
                 if self._vision_clear:
                   self._vision_clear()
                 else:
-                  det = _get_detector()
+                  det = self._get_detector()
                   if det:
                     det.clear_click()
                 logger.info("Cleared click-delta point (C).")

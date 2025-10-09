@@ -97,6 +97,7 @@ def run(connection_type, use_vision=False, use_control=False, swarm_uris=None):
         fps_display=helpers._f(os.getenv("FPS_DISPLAY"))
       )
       detector.open()
+      setattr(sys.modules[__name__], "detector", detector)
 
       command.set_vision_hooks(
         on_click=detector.set_click_point,
