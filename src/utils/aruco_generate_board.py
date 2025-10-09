@@ -74,8 +74,8 @@ if __name__ == "__main__":
     marker_id=marker_id,
     cols=5,
     rows=7,
-    marker_size_mm=35.0,
-    spacing_mm=3.0, # mm gaps
+    marker_size_mm=25.0,
+    spacing_mm=5.0, # mm gaps
     border_mm=10.0, # mm outer border
     dpi=300,
     output_filename=out_file
