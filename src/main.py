@@ -150,20 +150,15 @@ def run(connection_type, use_vision=False, use_control=False, swarm_uris=None):
         ctrl_stop = threading.Event()
         def _ctrl_loop():
           try:
-            command.follow_target_servo(
+            command.follow_target_ibvs(
               detector=detector,
               stop_event=ctrl_stop,
               start_event=command.ibvs_enable_event,
-              loop_hz=50,
-              gains=dict(Kpx=0.6, Kdx=0.2,
-                         Kpy=0.6, Kdy=0.2,
-                         Kpz=1.0, Kiz=0.2,
-                         Kpyaw=2.0, Kdyaw=0.3),
-              vision_yaw_alpha=0.05,
-              forward_nudge_alpha=0.03
+              loop_hz=20,
+              use_vertical=False
             )
           except Exception as e:
-            logger.error(f"Servo error: {e}")
+            logger.error(f"IBVS loop error: {e}")
         ctrl_thread = threading.Thread(target=_ctrl_loop, daemon=True)
         ctrl_thread.start()
 
