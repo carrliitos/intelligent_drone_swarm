@@ -167,40 +167,40 @@ class Command:
     # wrap to [-pi, pi)
     return (a + math.pi) % (2.0 * math.pi) - math.pi
 
-def _send_body_motion(self, vx: float, vy: float, vz: float, rate_yaw: float, dt: float):
-  """
-  Stream body-frame velocity + yaw-rate.
-  If Commander is enabled: send_hover_setpoint(vx, vy, yawrate_deg, z_abs).
-  We integrate vz into the absolute z-distance target.
-  Fallback: MotionCommander.start_linear_motion(vx, vy, vz, rate_yaw).
-  """
-  try:
-    if self._use_commander and self.cmdr is not None:
-      # integrate Z target (clamped)
-      if not math.isnan(vz) and abs(vz) > 1e-6:
-        self._z_target = max(0.10, self._z_target + float(vz) * float(dt))
-      self.cmdr.send_hover_setpoint(float(vx), float(vy), float(rate_yaw), float(self._z_target))
-    else:
-      if self.mc is None:
-        self.mc = MotionCommander(self.scf, default_height=self.takeoff_alt or 0.25)
-      self.mc.start_linear_motion(float(vx), float(vy), float(vz), rate_yaw=float(rate_yaw))
-  except Exception as e:
-    logger.debug(f"_send_body_motion failed: {e}")
+  def _send_body_motion(self, vx: float, vy: float, vz: float, rate_yaw: float, dt: float):
+    """
+    Stream body-frame velocity + yaw-rate.
+    If Commander is enabled: send_hover_setpoint(vx, vy, yawrate_deg, z_abs).
+    We integrate vz into the absolute z-distance target.
+    Fallback: MotionCommander.start_linear_motion(vx, vy, vz, rate_yaw).
+    """
+    try:
+      if self._use_commander and self.cmdr is not None:
+        # integrate Z target (clamped)
+        if not math.isnan(vz) and abs(vz) > 1e-6:
+          self._z_target = max(0.10, self._z_target + float(vz) * float(dt))
+        self.cmdr.send_hover_setpoint(float(vx), float(vy), float(rate_yaw), float(self._z_target))
+      else:
+        if self.mc is None:
+          self.mc = MotionCommander(self.scf, default_height=self.takeoff_alt or 0.25)
+        self.mc.start_linear_motion(float(vx), float(vy), float(vz), rate_yaw=float(rate_yaw))
+    except Exception as e:
+      logger.debug(f"_send_body_motion failed: {e}")
 
-def _stop_body_motion(self):
-  """Graceful stop depending on backend."""
-  try:
-    if self._use_commander and self.cmdr is not None:
-      try:
-        self.cmdr.send_stop_setpoint()
-        self.cmdr.send_notify_setpoint_stop(0)
-      except Exception:
-        pass
-    else:
-      if self.mc:
-        self._stop_body_motion()
-  except Exception as e:
-    logger.debug(f"_stop_body_motion failed: {e}")
+  def _stop_body_motion(self):
+    """Graceful stop depending on backend."""
+    try:
+      if self._use_commander and self.cmdr is not None:
+        try:
+          self.cmdr.send_stop_setpoint()
+          self.cmdr.send_notify_setpoint_stop(0)
+        except Exception:
+          pass
+      else:
+        if self.mc:
+          self._stop_body_motion()
+    except Exception as e:
+      logger.debug(f"_stop_body_motion failed: {e}")
 
   def _get_detector(self):
     import importlib, sys
