@@ -118,6 +118,15 @@ class Command:
     logger.info(f"IBVS backend: {'Commander' if self._use_commander else 'MotionCommander'}")
     # Absolute Z target (meters) for Commander.send_hover_setpoint
     self._z_target = float(takeoff_alt) if takeoff_alt is not None else 0.25
+    self._z_min = float(os.getenv("IBVS_Z_MIN", "0.10"))
+    self._z_max = float(os.getenv("IBVS_Z_MAX", "1.50"))
+
+    try:
+      self._z_sign = float(os.getenv("IBVS_Z_SIGN", "1"))
+      if self._z_sign == 0.0: 
+        self._z_sign = 1.0
+    except Exception: 
+      self._z_sign = 1.0
 
     self._ibvs_ref_px = None   # (fx, fy) clicked pixel
     self._ibvs_ref_area = None # desired area at click (keeps distance)
@@ -178,7 +187,9 @@ class Command:
       if self._use_commander and self.cmdr is not None:
         # integrate Z target (clamped)
         if not math.isnan(vz) and abs(vz) > 1e-6:
-          self._z_target = max(0.10, self._z_target + float(vz) * float(dt))
+          self._z_target = self._z_target + self._z_sign * float(vz) * float(dt)
+          self._z_target = min(self._z_max, max(self._z_min, self._z_target))
+          logger.debug(f"hover z_target={self._z_target:.2f} (vz={vz:.2f}, sign={self._z_sign})")
         self.cmdr.send_hover_setpoint(float(vx), float(vy), float(rate_yaw), float(self._z_target))
       else:
         if self.mc is None:
@@ -198,7 +209,7 @@ class Command:
           pass
       else:
         if self.mc:
-          self._stop_body_motion()
+          self.mc.stop()
     except Exception as e:
       logger.debug(f"_stop_body_motion failed: {e}")
 
