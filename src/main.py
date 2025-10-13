@@ -76,7 +76,7 @@ def run(connection_type, use_vision=False, use_control=False, swarm_uris=None):
       logger.info("==========Connecting to vision==========")
       detector = DetectorRT(
         dictionary=os.getenv("ARUCO_DICTIONARY"),
-        camera=helpers._i(os.getenv("CAMERA_CONNECTION")),
+        camera=os.getenv("CAMERA_CONNECTION"),
         width=helpers._i(os.getenv("CAMERA_WIDTH")),
         height=helpers._i(os.getenv("CAMERA_HEIGHT")),
         fps=helpers._i(os.getenv("CAMERA_FPS")),
