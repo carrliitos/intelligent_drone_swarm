@@ -20,6 +20,7 @@ load_dotenv(dotenv_path="config/.env")
 from cflib.crazyflie.log import LogConfig
 from cflib.crazyflie.syncLogger import SyncLogger
 from cflib.positioning.motion_commander import MotionCommander
+from cflib.crazyflie.commander import Commander
 
 from utils import context, helpers, logger as _logger
 from drone_connection import DroneConnection
@@ -112,6 +113,16 @@ class Command:
     self.max_wait_sec = 10.0  # hard cap per CF
 
     self.mc = None
+    self._use_commander = helpers._b(os.getenv("IBVS_USE_COMMANDER"), default=True)
+    self.cmdr = Commander(self.scf.cf) if self._use_commander else None
+    logger.info(f"IBVS backend: {'Commander' if self._use_commander else 'MotionCommander'}")
+    # Absolute Z target (meters) for Commander.send_hover_setpoint
+    self._z_target = float(takeoff_alt) if takeoff_alt is not None else 0.25
+
+    self._ibvs_ref_px = None   # (fx, fy) clicked pixel
+    self._ibvs_ref_area = None # desired area at click (keeps distance)
+    self.click2go_tol_px = 8
+
     self.manual_active = False
     self.swarm_active = False
     self._l_was_down = False      # for 'L' edge detection
@@ -155,6 +166,41 @@ class Command:
   def _wrap_pi(a):
     # wrap to [-pi, pi)
     return (a + math.pi) % (2.0 * math.pi) - math.pi
+
+def _send_body_motion(self, vx: float, vy: float, vz: float, rate_yaw: float, dt: float):
+  """
+  Stream body-frame velocity + yaw-rate.
+  If Commander is enabled: send_hover_setpoint(vx, vy, yawrate_deg, z_abs).
+  We integrate vz into the absolute z-distance target.
+  Fallback: MotionCommander.start_linear_motion(vx, vy, vz, rate_yaw).
+  """
+  try:
+    if self._use_commander and self.cmdr is not None:
+      # integrate Z target (clamped)
+      if not math.isnan(vz) and abs(vz) > 1e-6:
+        self._z_target = max(0.10, self._z_target + float(vz) * float(dt))
+      self.cmdr.send_hover_setpoint(float(vx), float(vy), float(rate_yaw), float(self._z_target))
+    else:
+      if self.mc is None:
+        self.mc = MotionCommander(self.scf, default_height=self.takeoff_alt or 0.25)
+      self.mc.start_linear_motion(float(vx), float(vy), float(vz), rate_yaw=float(rate_yaw))
+  except Exception as e:
+    logger.debug(f"_send_body_motion failed: {e}")
+
+def _stop_body_motion(self):
+  """Graceful stop depending on backend."""
+  try:
+    if self._use_commander and self.cmdr is not None:
+      try:
+        self.cmdr.send_stop_setpoint()
+        self.cmdr.send_notify_setpoint_stop(0)
+      except Exception:
+        pass
+    else:
+      if self.mc:
+        self._stop_body_motion()
+  except Exception as e:
+    logger.debug(f"_stop_body_motion failed: {e}")
 
   def _get_detector(self):
     import importlib, sys
@@ -451,7 +497,7 @@ class Command:
 
     # Neutral hover if nothing is pressed
     if not moved:
-      self.mc.stop()
+      self._stop_body_motion()
 
   def _go_swarm(self, keys):
     """
@@ -641,6 +687,20 @@ class Command:
               mapped = _map_click(mx, my)
               if mapped and self._vision_click:
                 fx, fy = mapped
+                self._ibvs_ref_px = (fx, fy)
+                try:
+                  det = self._get_detector()
+                  res = det.latest()[1] if det else None
+                  if res:
+                    # grab the current area as “distance” target
+                    tgt = det.primary_target(res, None) if hasattr(det, "primary_target") else None
+                    if tgt:
+                      _, _, area, *_ = tgt
+                      self._ibvs_ref_area = float(area)
+                except Exception:
+                  pass
+                logger.info(f"IBVS click-to-go: target set at (fx={fx:.1f}, fy={fy:.1f})")
+
                 # Forward to detector (will draw crosshair + delta on next frame)
                 try:
                   self._vision_click(fx, fy)
@@ -681,6 +741,10 @@ class Command:
                   if det:
                     det.clear_click()
                 logger.info("Cleared click-delta point (C).")
+
+                self._ibvs_ref_px = None
+                self._ibvs_ref_area = None
+                logger.info("IBVS click-to-go: target cleared.")
               except Exception as e:
                 logger.debug(f"Clear failed: {e}")
 
@@ -999,6 +1063,8 @@ class Command:
     fwd_kp, fwd_kd = 0.50, 0.10  # m/s per unit distance error
     vrt_kp, vrt_kd = 0.40, 0.10  # m/s per unit vertical error
 
+    k_lin_p, k_lin_d = 0.60, 0.12 # IBVS pixel -> body velocity gains (click-to-go)
+
     # Clamps and headbands
     yaw_max, vx_max, vz_max = 180.0, 0.30, 0.25
     db_px, db_dist = 0.02, 0.02
@@ -1035,9 +1101,13 @@ class Command:
       if halfW is None: halfW, halfH = W / 2.0, H / 2.0
 
       # normalized errors
-      ex = (cx - halfW) / halfW          # [-1,1], horizontal pixel error → yaw
-      ey = (cy - halfH) / halfH          # vertical pixel error → vz (optional)
-      ed = (desired_area_px - max(area, 1.0)) / max(desired_area_px, 1.0)
+      rx, ry = (self._ibvs_ref_px if self._ibvs_ref_px else (halfW, halfH))
+      ex = (cx - rx) / halfW          # horizontal pixel error → yaw/forward via your IBVS
+      ey = (cy - ry) / halfH          # vertical pixel error (often ignored if you hold Z)
+
+      ed = 0.0
+      if self._ibvs_ref_area is not None:
+        ed = (self._ibvs_ref_area - max(area, 1.0)) / max(self._ibvs_ref_area, 1.0)
 
       # deadbands
       if abs(ex) < db_px: ex = 0.0
@@ -1050,13 +1120,24 @@ class Command:
       ey_d = 0.0 if ey_prev is None else (ey - ey_prev) / dt
       ex_prev, ed_prev, ey_prev = ex, ed, ey
 
-      # PD to commands + clamp
-      yaw_rate = max(-yaw_max, min(yaw_max, (yaw_kp  *ex) + (yaw_kd * ex_d))) # deg/s
-      vx = max(-vx_max, min(vx_max, (fwd_kp * ed) + (fwd_kd * ed_d)))         # m/s
-      vz = 0.0 if not use_vertical else max(-vz_max, min(vz_max, (vrt_kp * ey) + (vrt_kd * ey_d)))
+      # Click-to-go mapping: keep yaw fixed; drive with lateral body velocities
+      yaw_rate = 0.0
+      # Pixel up/down (−ey) -> forward/back; pixel left/right (−ex) -> strafe
+      vx_b = self._sat(k_lin_p * (-ey) + k_lin_d * (-(ey_d)), -vx_max, vx_max)
+      vy_b = self._sat(k_lin_p * (-ex) + k_lin_d * (-(ex_d)), -vx_max, vx_max)
+      vz   = 0.0 if not use_vertical else self._sat((vrt_kp * ey) + (vrt_kd * ey_d), -vz_max, vz_max)
 
-      # send setpoint (vy=0 for simplicity)
-      self.mc.start_linear_motion(vx, 0.0, vz, rate_yaw=yaw_rate)
+      # Stop when the pixel is inside tolerance of the clicked target
+      if self._ibvs_ref_px is not None:
+        if abs(cx - rx) < self.click2go_tol_px and abs(cy - ry) < self.click2go_tol_px:
+          self._stop_body_motion()
+          self._ibvs_ref_px = None
+          self._ibvs_ref_area = None
+          logger.info("IBVS click-to-go: reached target; stopping.")
+          time.sleep(0.1)
+          continue
+
+      self._send_body_motion(vx_b, vy_b, vz, yaw_rate, dt)
 
       # pacing
       elapsed = time.time() - t0
@@ -1108,7 +1189,7 @@ class Command:
         ok_est = True
 
       if not ok_est:
-        self.mc.stop()
+        self._stop_body_motion()
         time.sleep(dt)
         continue
 
@@ -1184,7 +1265,7 @@ class Command:
       vy_b = self._sat(vy_b, -max_vxy, max_vxy)
 
       # send it
-      self.mc.start_linear_motion(vx_b, vy_b, vz, rate_yaw=rate_yaw)
+      self._send_body_motion(vx_b, vy_b, vz, rate_yaw, dt)
 
       # pacing
       elapsed = time.time() - t0
