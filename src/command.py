@@ -1107,7 +1107,10 @@ class Command:
       # gate: only do something while G/S flight modes are active
       if (start_event is None or not start_event.is_set()) or not (self.manual_active or self.swarm_active):
         # keep motors alive with a neutral hover setpoint
-        self._send_body_motion(0.0, 0.0, 0.0, 0.0, dt)
+        vx_cmd = 0.0
+        vy_cmd = 0.0
+        last_valid_t = None
+        ex_prev = ed_prev = ey_prev = None
         time.sleep(dt)
         continue
 
