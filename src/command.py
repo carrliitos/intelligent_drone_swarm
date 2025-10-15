@@ -1148,6 +1148,8 @@ class Command:
           time.sleep(0.1)
           continue
 
+      logger.info("Sending body motion: "
+                 f"[vx_b={vx_b} | vy_b={vy_b} | vz={vz} | yaw_rate={yaw_rate} | dt={dt}]")
       self._send_body_motion(vx_b, vy_b, vz, yaw_rate, dt)
 
       # pacing
