@@ -11,14 +11,18 @@ import os
 import platform
 import cv2
 import logging
+from pathlib import Path
+from dotenv import load_dotenv
+load_dotenv(dotenv_path="config/.env") 
 
-PROJECT_ROOT = os.path.join(os.path.dirname(__file__), "..")
-SRC_PATH = os.path.join(PROJECT_ROOT, "src")
-sys.path.extend([PROJECT_ROOT, SRC_PATH])
-os.environ["LOG_LEVEL"] = "INFO"
-logging.warning = logging.WARNING
+from utils import context, helpers, logger as _logger
+from vision import DetectorRT
 
-from src.vision import DetectorRT
+directory = context.get_context(os.path.abspath(__file__))
+logger_file_name = Path(directory).stem
+logger_name = Path(__file__).stem
+logger_file = f"{directory}/logs/{logger_file_name}.log"
+logger = _logger.setup_logger(logger_name=logger_name, log_file=logger_file, log_level=os.getenv("LOG_LEVEL"))
 
 def test_camera(camera_index=0):
   """
@@ -45,29 +49,27 @@ def test_camera(camera_index=0):
 
   try:
     detector.open()
-    print(f"Camera {camera_index} opened. Press 'q' to quit.")
+    logging.info(f"Camera {camera_index} opened. Press 'q' to quit.")
 
     while True:
       frame, results = detector.read()
       if frame is None:
-        print("\nISSUE: no frame captured from camera")
+        logging.error("\nISSUE: no frame captured from camera")
         break
 
       fps = results.get("fps", 0.0)
-      print(f"\rFPS: {fps:.1f}", end="", flush=True)
+      logging.info(f"\rFPS: {fps:.1f}", end="", flush=True)
       cv2.imshow("Camera Feed", frame)
 
       # quit on 'q'
       if cv2.waitKey(1) == ord('q'):
         break
-
   except KeyboardInterrupt:
-    print("\nExiting per user.")
-
+    logging.info("\nExiting per user.")
   finally:
     detector.release()
     cv2.destroyAllWindows()
-    print("Camera released")
+    logging.info("Camera released")
     cv2.VideoCapture = orig_videocapture
 
 if __name__ == "__main__":
