@@ -413,6 +413,8 @@ class DetectorRT:
     dx_px = int(round(click_x - cx))
     dy_px = int(round(click_y - cy))
 
+    logger.debug(f"Mouse click on ({click_x}, {click_y})")
+
     # Draw visuals
     cv2.drawMarker(frame, (click_x, click_y), (255, 255, 255), cv2.MARKER_TILTED_CROSS, 14, 2)
     cv2.circle(frame, (int(round(cx)), int(round(cy))), 4, (0, 255, 255), -1, cv2.LINE_AA)
