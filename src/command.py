@@ -531,6 +531,8 @@ class Command:
     console_size = (520, 600)
 
     if _has_multiwin():
+      logger.info("Has dual-window.")
+
       # two real OS windows
       video_win = Window("Drone View", size=video_size, resizable=True)
       console_win = Window("Drone Console", size=console_size, resizable=True)
