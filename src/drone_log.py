@@ -89,7 +89,6 @@ class DroneLogs:
     """
     Continuously write drone data to a CSV file in the background.
     """
-    # curr_time = datetime.datetime.now().strftime("%H-%M-%S")
     log_path = f"{directory}/data/telemetry_log.csv"
 
     columns = [
