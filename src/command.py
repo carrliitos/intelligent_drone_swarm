@@ -130,7 +130,7 @@ class Command:
 
     self._ibvs_ref_px = None   # (fx, fy) clicked pixel
     self._ibvs_ref_area = None # desired area at click (keeps distance)
-    self.click2go_tol_px = 8
+    self.click2go_tol_px = helpers._to_int(os.getenv("CLICK2GO_TOL_PX"), default=8) or 8
 
     self.manual_active = False
     self.swarm_active = False
@@ -755,6 +755,8 @@ class Command:
                     det.clear_click()
                 logger.info("Cleared click-delta point (C).")
 
+                # Also stop any residual motion on cancel
+                self._stop_body_motion()
                 self._ibvs_ref_px = None
                 self._ibvs_ref_area = None
                 logger.info("IBVS click-to-go: target cleared.")
@@ -1082,6 +1084,10 @@ class Command:
     yaw_max, vx_max, vz_max = 180.0, 0.30, 0.25
     db_px, db_dist = 0.02, 0.02
 
+    vx_max = helpers._to_float(os.getenv("CLICK2GO_MAX_SPEED"), default=vx_max) or vx_max
+    loss_N = helpers._to_int(os.getenv("CLICK2GO_TAG_LOSS_FRAMES"), default=10) or 10
+    lost_frames = 0
+
     # derivative memory
     ex_prev = ed_prev = ey_prev = None
 
@@ -1098,15 +1104,23 @@ class Command:
 
       frame, res = detector.latest()
       if frame is None or not res:
+        lost_frames += 1
+        if self._ibvs_ref_px is not None and lost_frames >= loss_N:
+          self._stop_body_motion()
+          logger.info(f"IBVS click-to-go: paused (tag loss {lost_frames} frames).")
         time.sleep(dt)
         continue
 
       tgt = vision.primary_target(res, frame.shape)
       if not tgt:
-        # no target? then do nothing (PyGame continues to command)
-        logger.debug("IBVS: no target detected this frame")
+        lost_frames += 1
+        if self._ibvs_ref_px is not None and lost_frames >= loss_N:
+          self._stop_body_motion()
+          logger.info(f"IBVS click-to-go: paused (no marker {lost_frames} frames).")
         time.sleep(dt)
         continue
+      else:
+        lost_frames = 0
 
       cx, cy, area, W, H = tgt
       logger.debug(f"IBVS target: cx={cx:.1f}, cy={cy:.1f}, area={area:.0f}")
@@ -1133,12 +1147,20 @@ class Command:
       ey_d = 0.0 if ey_prev is None else (ey - ey_prev) / dt
       ex_prev, ed_prev, ey_prev = ex, ed, ey
 
+      # If no active click target, hold station (no IBVS motion)
+      if self._ibvs_ref_px is None:
+        self._stop_body_motion()
+        elapsed = time.time() - t0
+        if elapsed < dt: time.sleep(dt - elapsed)
+        continue
+
       # Click-to-go mapping: keep yaw fixed; drive with lateral body velocities
       yaw_rate = 0.0
       # Pixel up/down (−ey) -> forward/back; pixel left/right (−ex) -> strafe
       vx_b = self._sat(k_lin_p * (-ey) + k_lin_d * (-(ey_d)), -vx_max, vx_max)
       vy_b = self._sat(k_lin_p * (-ex) + k_lin_d * (-(ex_d)), -vx_max, vx_max)
-      vz   = 0.0 if not use_vertical else self._sat((vrt_kp * ey) + (vrt_kd * ey_d), -vz_max, vz_max)
+      vz = 0.0 if not use_vertical else self._sat((vrt_kp * ey) + (vrt_kd * ey_d), -vz_max, vz_max)
+      logger.debug(f"IBVS cmd: vx={vx_b:.2f} vy={vy_b:.2f} tol={self.click2go_tol_px}px ex={ex:.3f} ey={ey:.3f}")
 
       # Stop when the pixel is inside tolerance of the clicked target
       if self._ibvs_ref_px is not None:
