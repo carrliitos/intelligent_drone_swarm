@@ -184,6 +184,12 @@ class Command:
     Fallback: MotionCommander.start_linear_motion(vx, vy, vz, rate_yaw).
     """
     try:
+      commander_enabled = self._use_commander and (self.cmdr is not None)
+      logger.debug(f"Commander is enabled: {commander_enabled}")
+
+      vx = -vx
+      vy = -vy
+
       if self._use_commander and self.cmdr is not None:
         # integrate Z target (clamped)
         if not math.isnan(vz) and abs(vz) > 1e-6:
