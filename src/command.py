@@ -508,7 +508,8 @@ class Command:
 
     # Neutral hover if nothing is pressed
     if not moved:
-      self._stop_body_motion()
+      # Stream a zero-velocity hover setpoint
+      self._send_body_motion(0.0, 0.0, 0.0, 0.0, 0.0)
 
   def _go_swarm(self, keys):
     """
@@ -1086,6 +1087,15 @@ class Command:
 
     vx_max = helpers._to_float(os.getenv("CLICK2GO_MAX_SPEED"), default=vx_max) or vx_max
     loss_N = helpers._to_int(os.getenv("CLICK2GO_TAG_LOSS_FRAMES"), default=10) or 10
+    err_alpha = helpers._to_float(os.getenv("CLICK2GO_ERR_LPF"), default=0.35) or 0.35
+    vel_slew = helpers._to_float(os.getenv("CLICK2GO_VEL_SLEW"), default=0.8) or 0.8  # m/s^2
+
+    # state for filters/derivatives
+    ex_f = 0.0
+    ey_f = 0.0
+    vx_cmd = 0.0
+    vy_cmd = 0.0
+    last_valid_t = None
     lost_frames = 0
 
     # derivative memory
@@ -1094,11 +1104,10 @@ class Command:
     while not stop_event.is_set():
       t0 = time.time()
 
-      # gate: only do someting while G/S flight modes are active
+      # gate: only do something while G/S flight modes are active
       if (start_event is None or not start_event.is_set()) or not (self.manual_active or self.swarm_active):
-        # stay idle; do not hover or land here
-        logger.debug(f"IBVS idle: event={start_event.is_set() if start_event else None}, "
-                     f"manual={self.manual_active}, swarm={self.swarm_active}")
+        # keep motors alive with a neutral hover setpoint
+        self._send_body_motion(0.0, 0.0, 0.0, 0.0, dt)
         time.sleep(dt)
         continue
 
@@ -1106,7 +1115,7 @@ class Command:
       if frame is None or not res:
         lost_frames += 1
         if self._ibvs_ref_px is not None and lost_frames >= loss_N:
-          self._stop_body_motion()
+          self._send_body_motion(0.0, 0.0, 0.0, 0.0, dt)
           logger.info(f"IBVS click-to-go: paused (tag loss {lost_frames} frames).")
         time.sleep(dt)
         continue
@@ -1141,11 +1150,29 @@ class Command:
       if abs(ey) < db_px: ey = 0.0
       if abs(ed) < db_dist: ed = 0.0
 
-      # finite diffs (derivative)
-      ex_d = 0.0 if ex_prev is None else (ex - ex_prev) / dt
-      ed_d = 0.0 if ed_prev is None else (ed - ed_prev) / dt
-      ey_d = 0.0 if ey_prev is None else (ey - ey_prev) / dt
-      ex_prev, ed_prev, ey_prev = ex, ed, ey
+      # low-pass error and compute derivatives with actual time since last detection
+      ex_f = (1.0 - err_alpha) * ex_f + err_alpha * ex
+      ey_f = (1.0 - err_alpha) * ey_f + err_alpha * ey
+      now = time.time()
+
+      if last_valid_t is None:
+        dt_valid = dt
+      else:
+        dt_valid = max(1e-3, now - last_valid_t)
+
+      ex_d = 0.0 if ex_prev is None else (ex_f - ex_prev) / dt_valid
+      ed_d = 0.0 if ed_prev is None else (ed - ed_prev) / dt_valid
+      ey_d = 0.0 if ey_prev is None else (ey_f - ey_prev) / dt_valid
+      last_valid_t = now
+      ex_prev, ed_prev, ey_prev = ex_f, ed, ey_f
+
+      # If no active click target, hold station (keep sending zeros to preserve cadence)
+      if self._ibvs_ref_px is None:
+        self._send_body_motion(0.0, 0.0, 0.0, 0.0, dt)
+        elapsed = time.time() - t0
+        if elapsed < dt:
+          time.sleep(dt - elapsed)
+        continue
 
       # If no active click target, hold station (no IBVS motion)
       if self._ibvs_ref_px is None:
@@ -1156,24 +1183,34 @@ class Command:
 
       # Click-to-go mapping: keep yaw fixed; drive with lateral body velocities
       yaw_rate = 0.0
-      # Pixel up/down (−ey) -> forward/back; pixel left/right (−ex) -> strafe
-      vx_b = self._sat(k_lin_p * (-ey) + k_lin_d * (-(ey_d)), -vx_max, vx_max)
-      vy_b = self._sat(k_lin_p * (-ex) + k_lin_d * (-(ex_d)), -vx_max, vx_max)
-      vz = 0.0 if not use_vertical else self._sat((vrt_kp * ey) + (vrt_kd * ey_d), -vz_max, vz_max)
+
+      # Pixel up/down (−ey_f) -> forward/back; pixel left/right (−ex_f) -> strafe
+      vx_des = self._sat(k_lin_p * (-ey_f) + k_lin_d * (-(ey_d)), -vx_max, vx_max)
+      vy_des = self._sat(k_lin_p * (-ex_f) + k_lin_d * (-(ex_d)), -vx_max, vx_max)
+
+      # slew-limit toward desired velocity to prevent thrust puffs
+      max_step = vel_slew * dt_valid
+      vx_cmd = vx_cmd + self._sat(vx_des - vx_cmd, -max_step, +max_step)
+      vy_cmd = vy_cmd + self._sat(vy_des - vy_cmd, -max_step, +max_step)
+      vx_b = vx_cmd
+      vy_b = vy_cmd
+      vz = 0.0 if not use_vertical else self._sat((vrt_kp * ey_f) + (vrt_kd * ey_d), -vz_max, vz_max)
       logger.debug(f"IBVS cmd: vx={vx_b:.2f} vy={vy_b:.2f} tol={self.click2go_tol_px}px ex={ex:.3f} ey={ey:.3f}")
 
       # Stop when the pixel is inside tolerance of the clicked target
       if self._ibvs_ref_px is not None:
         if abs(cx - rx) < self.click2go_tol_px and abs(cy - ry) < self.click2go_tol_px:
-          self._stop_body_motion()
+          # neutral hover instead of STOP to prevent thrust drop
+          self._send_body_motion(0.0, 0.0, 0.0, 0.0, dt)
           self._ibvs_ref_px = None
           self._ibvs_ref_area = None
-          logger.info("IBVS click-to-go: reached target; stopping.")
+          logger.info("IBVS click-to-go: reached target; hovering.")
           time.sleep(0.1)
           continue
 
-      logger.info("Sending body motion: "
-                 f"[vx_b={vx_b} | vy_b={vy_b} | vz={vz} | yaw_rate={yaw_rate} | dt={dt}]")
+      logger.info("Sending body motion: " \
+                 f"[vx_b={vx_b:.2f} | vy_b={vy_b:.2f} | vz={vz:.2f} | "
+                 f"yaw_rate={yaw_rate:.2f} | dt={dt_valid:.3f}]")
       self._send_body_motion(vx_b, vy_b, vz, yaw_rate, dt)
 
       # pacing

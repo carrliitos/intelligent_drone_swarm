@@ -6,6 +6,7 @@ import pandas as pd
 import datetime
 import contextlib
 
+from datetime import datetime
 from pathlib import Path
 from cflib.crazyflie.log import LogConfig
 from utils import logger, context
@@ -88,7 +89,7 @@ class DroneLogs:
     """
     Continuously write drone data to a CSV file in the background.
     """
-    curr_time = datetime.datetime.now().strftime("%H-%M-%S")
+    # curr_time = datetime.datetime.now().strftime("%H-%M-%S")
     log_path = f"{directory}/data/telemetry_log.csv"
 
     columns = [
@@ -115,7 +116,7 @@ class DroneLogs:
       while not self._stop_event.is_set():
         with self.lock:
           row = [
-              time.time(),
+              datetime.fromtimestamp(time.time()),
               self.sys_canfly, self.sys_isFlying, self.sys_isTumbled,
               self.thrust, self.roll, self.pitch, self.yaw,
               self.stateEstimate_x, self.stateEstimate_y, self.stateEstimate_z,
