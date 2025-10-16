@@ -407,6 +407,10 @@ class DetectorRT:
       # No target; draw click but no delta
       cv2.drawMarker(frame, (click_x, click_y), (200, 200, 255), cv2.MARKER_CROSS, 12, 2)
       cv2.putText(frame, "No marker", (click_x+8, click_y-8), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200,200,255), 1, cv2.LINE_AA)
+      # Tell command.py we currently cannot track the clicked target
+      results["click_trackable"] = False
+      results["click_marker_center"] = None
+      results["click_marker_area_px"] = None
       return
 
     idx, mid, cx, cy = chosen
@@ -465,6 +469,19 @@ class DetectorRT:
         _logfmt("metric_delta_error", level=logging.DEBUG, err=str(e))
 
     cv2.putText(frame, label + metric_txt, (click_x + 8, click_y - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255,255,255), 2, cv2.LINE_AA)
+
+    # Expose click-tracking info to command.py
+    results["click_trackable"] = True
+    results["click_marker_center"] = (float(cx), float(cy))
+    try:
+      crn = results.get("corners")
+
+      if crn is not None:
+        area_px = float(cv2.contourArea(crn[idx][0].astype(np.float32)))
+        results["click_marker_area_px"] = area_px
+    except Exception:
+      results["click_marker_area_px"] = None
+
     _logfmt("click_delta", id=int(mid), x=click_x, y=click_y, cx=f"{cx:.1f}", cy=f"{cy:.1f}", dx_px=dx_px, dy_px=dy_px, metric=metric_txt.strip())
 
   def open(self):
@@ -780,6 +797,11 @@ class DetectorRT:
       "dist_m": dists,
       "fps": self._fps_display
     }
+
+    # Defaults for click-to-go linkage with command.py
+    results["click_trackable"] = False
+    results["click_marker_center"] = None
+    results["click_marker_area_px"] = None
 
     # Overlays
     self._overlay_grid(frame)

@@ -136,6 +136,8 @@ class Command:
     self.swarm_active = False
     self._l_was_down = False      # for 'L' edge detection
     self._g_was_down = False      # for 'G' edge detection (enter manual)
+    self._hold_active = False     # vision lost -> hover hold gate
+    self._hold_since = 0.0
     self._s_was_down = False      # for 'S' edge (enter swarm manual)
     self.speed_xy = 0.25          # m/s
     self.speed_z  = 0.25          # m/s
@@ -186,9 +188,6 @@ class Command:
     try:
       commander_enabled = self._use_commander and (self.cmdr is not None)
       logger.debug(f"Commander is enabled: {commander_enabled}")
-
-      vx = -vx
-      vy = -vy
 
       if self._use_commander and self.cmdr is not None:
         # integrate Z target (clamped)
@@ -766,6 +765,7 @@ class Command:
                 self._stop_body_motion()
                 self._ibvs_ref_px = None
                 self._ibvs_ref_area = None
+                self._hold_active = False
                 logger.info("IBVS click-to-go: target cleared.")
               except Exception as e:
                 logger.debug(f"Clear failed: {e}")
@@ -1103,6 +1103,7 @@ class Command:
     vy_cmd = 0.0
     last_valid_t = None
     lost_frames = 0
+    seen_frames = 0
 
     # derivative memory
     ex_prev = ed_prev = ey_prev = None
@@ -1121,24 +1122,46 @@ class Command:
         continue
 
       frame, res = detector.latest()
-      if frame is None or not res:
-        lost_frames += 1
-        if self._ibvs_ref_px is not None and lost_frames >= loss_N:
-          self._send_body_motion(0.0, 0.0, 0.0, 0.0, dt)
-          logger.info(f"IBVS click-to-go: paused (tag loss {lost_frames} frames).")
-        time.sleep(dt)
-        continue
+      # Drive pause/resume from vision.py's overlay output
+      trackable = False
+      if res:
+        trackable = bool(res.get("click_trackable", False))
 
-      tgt = vision.primary_target(res, frame.shape)
-      if not tgt:
+      if not res or not trackable:
         lost_frames += 1
-        if self._ibvs_ref_px is not None and lost_frames >= loss_N:
-          self._stop_body_motion()
-          logger.info(f"IBVS click-to-go: paused (no marker {lost_frames} frames).")
+        # Enter/maintain HOLD without clearing the click target
+
+        if not self._hold_active and self._ibvs_ref_px is not None:
+          self._hold_active = True
+          self._hold_since = time.time()
+          logger.info("IBVS click-to-go: paused (clicked marker not trackable)")
+
+        # Neutral hover (vx=vy=vz=yaw=0). NOTE: vz is velocity; keep it 0.0.
+        self._send_body_motion(0.0, 0.0, 0.0, 0.0, dt)
         time.sleep(dt)
         continue
       else:
+        # Resume if we were holding
+        if self._hold_active:
+          self._hold_active = False
+          logger.info("IBVS click-to-go: resumed (clicked marker trackable)")
         lost_frames = 0
+
+      # Prefer the marker center provided by vision.py for stability
+      cm = res.get("click_marker_center")
+      if cm is not None:
+        cx, cy = float(cm[0]), float(cm[1])
+        H, W = frame.shape[:2]
+        area = float(res.get("click_marker_area_px") or 1.0)
+        tgt = (cx, cy, area, float(W), float(H))
+      else:
+        # Fallback to your existing primary_target() if vision didn't attach center
+        tgt = vision.primary_target(res, frame.shape)
+
+        if not tgt:
+          self._send_body_motion(0.0, 0.0, 0.0, 0.0, dt)
+          time.sleep(dt)
+          continue
 
       cx, cy, area, W, H = tgt
       logger.debug(f"IBVS target: cx={cx:.1f}, cy={cy:.1f}, area={area:.0f}")
@@ -1183,13 +1206,6 @@ class Command:
           time.sleep(dt - elapsed)
         continue
 
-      # If no active click target, hold station (no IBVS motion)
-      if self._ibvs_ref_px is None:
-        self._stop_body_motion()
-        elapsed = time.time() - t0
-        if elapsed < dt: time.sleep(dt - elapsed)
-        continue
-
       # Click-to-go mapping: keep yaw fixed; drive with lateral body velocities
       yaw_rate = 0.0
 
@@ -1209,17 +1225,18 @@ class Command:
       # Stop when the pixel is inside tolerance of the clicked target
       if self._ibvs_ref_px is not None:
         if abs(cx - rx) < self.click2go_tol_px and abs(cy - ry) < self.click2go_tol_px:
-          # neutral hover instead of STOP to prevent thrust drop
+          # Neutral hover instead of STOP to prevent thrust drop
           self._send_body_motion(0.0, 0.0, 0.0, 0.0, dt)
           self._ibvs_ref_px = None
           self._ibvs_ref_area = None
+          self._hold_active = False
           logger.info("IBVS click-to-go: reached target; hovering.")
           time.sleep(0.1)
           continue
 
-      logger.info("Sending body motion: " \
-                 f"[vx_b={vx_b:.2f} | vy_b={vy_b:.2f} | vz={vz:.2f} | "
-                 f"yaw_rate={yaw_rate:.2f} | dt={dt_valid:.3f}]")
+      logger.debug("Sending body motion: " \
+                  f"[vx_b={vx_b:.2f} | vy_b={vy_b:.2f} | vz={vz:.2f} | "
+                  f"yaw_rate={yaw_rate:.2f} | dt={dt_valid:.3f}]")
       self._send_body_motion(vx_b, vy_b, vz, yaw_rate, dt)
 
       # pacing
