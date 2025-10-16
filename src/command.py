@@ -1085,16 +1085,17 @@ class Command:
     fwd_kp, fwd_kd = 0.50, 0.10  # m/s per unit distance error
     vrt_kp, vrt_kd = 0.40, 0.10  # m/s per unit vertical error
 
-    k_lin_p, k_lin_d = 0.60, 0.12 # IBVS pixel -> body velocity gains (click-to-go)
+    k_lin_p, k_lin_d = 0.45, 0.22 # IBVS pixel -> body velocity gains (click-to-go)
 
     # Clamps and headbands
-    yaw_max, vx_max, vz_max = 180.0, 0.30, 0.25
+    yaw_max, vx_max, vz_max = 180.0, 0.25, 0.18
     db_px, db_dist = 0.02, 0.02
 
     vx_max = helpers._to_float(os.getenv("CLICK2GO_MAX_SPEED"), default=vx_max) or vx_max
-    loss_N = helpers._to_int(os.getenv("CLICK2GO_TAG_LOSS_FRAMES"), default=10) or 10
-    err_alpha = helpers._to_float(os.getenv("CLICK2GO_ERR_LPF"), default=0.35) or 0.35
-    vel_slew = helpers._to_float(os.getenv("CLICK2GO_VEL_SLEW"), default=0.8) or 0.8  # m/s^2
+    loss_N = helpers._to_int(os.getenv("CLICK2GO_TAG_LOSS_FRAMES"), default=6) or 6
+    resume_M = helpers._to_int(os.getenv("CLICK2GO_RESUME_FRAMES"), default=3) or 3
+    err_alpha = helpers._to_float(os.getenv("CLICK2GO_ERR_LPF"), default=0.18) or 0.18
+    vel_slew = helpers._to_float(os.getenv("CLICK2GO_VEL_SLEW"), default=0.5) or 0.5  # m/s^2
 
     # state for filters/derivatives
     ex_f = 0.0
@@ -1107,6 +1108,8 @@ class Command:
 
     # derivative memory
     ex_prev = ed_prev = ey_prev = None
+    ex_dot_f = 0.0
+    ey_dot_f = 0.0
 
     while not stop_event.is_set():
       t0 = time.time()
@@ -1129,23 +1132,25 @@ class Command:
 
       if not res or not trackable:
         lost_frames += 1
-        # Enter/maintain HOLD without clearing the click target
-
-        if not self._hold_active and self._ibvs_ref_px is not None:
+        seen_frames = 0
+        # Enter/maintain HOLD only after N consecutive misses
+        if (not self._hold_active) and self._ibvs_ref_px is not None and lost_frames >= loss_N:
           self._hold_active = True
           self._hold_since = time.time()
           logger.info("IBVS click-to-go: paused (clicked marker not trackable)")
 
-        # Neutral hover (vx=vy=vz=yaw=0). NOTE: vz is velocity; keep it 0.0.
-        self._send_body_motion(0.0, 0.0, 0.0, 0.0, dt)
-        time.sleep(dt)
-        continue
-      else:
-        # Resume if we were holding
         if self._hold_active:
+          # Neutral hover
+          self._send_body_motion(0.0, 0.0, 0.0, 0.0, dt)
+          time.sleep(dt)
+          continue
+      else:
+        lost_frames = 0
+        seen_frames += 1
+        # Resume only after M consecutive good frames
+        if self._hold_active and seen_frames >= resume_M:
           self._hold_active = False
           logger.info("IBVS click-to-go: resumed (clicked marker trackable)")
-        lost_frames = 0
 
       # Prefer the marker center provided by vision.py for stability
       cm = res.get("click_marker_center")
@@ -1192,9 +1197,20 @@ class Command:
       else:
         dt_valid = max(1e-3, now - last_valid_t)
 
-      ex_d = 0.0 if ex_prev is None else (ex_f - ex_prev) / dt_valid
+      # clamp dt_valid to avoid D spikes on frame hiccups
+      dt_valid = min(max(1/60.0, dt_valid), 0.10)
+
+      # raw derivatives
+      ex_d_raw = 0.0 if ex_prev is None else (ex_f - ex_prev) / dt_valid
       ed_d = 0.0 if ed_prev is None else (ed - ed_prev) / dt_valid
-      ey_d = 0.0 if ey_prev is None else (ey_f - ey_prev) / dt_valid
+      ey_d_raw = 0.0 if ey_prev is None else (ey_f - ey_prev) / dt_valid
+
+      # smooth derivatives (EMA)
+      DERIV_ALPHA = 0.35
+
+      ex_dot_f = (1.0 - DERIV_ALPHA) * ex_dot_f + DERIV_ALPHA * ex_d_raw
+      ey_dot_f = (1.0 - DERIV_ALPHA) * ey_dot_f + DERIV_ALPHA * ey_d_raw
+      ex_d, ey_d = ex_dot_f, ey_dot_f
       last_valid_t = now
       ex_prev, ed_prev, ey_prev = ex_f, ed, ey_f
 

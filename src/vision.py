@@ -184,6 +184,12 @@ class DetectorRT:
     self._delta_enabled = bool(int(os.getenv("CLICK_DELTA_ENABLED", "1")))
     self._metric_enabled = bool(int(os.getenv("CLICK_DELTA_METRIC", "1")))
 
+    # metric delta smoothing
+    self._dm_ok_norm = float(os.getenv("CLICK_DELTA_DM_OK_NORM"))
+    self._dm_max_step = float(os.getenv("CLICK_DELTA_DM_MAX_STEP"))
+    self._dm_ema = float(os.getenv("CLICK_DELTA_DM_EMA"))
+    self._dm_prev = None  # (dX, dY) in meters
+
     # grid defaults
     self.draw_grid = bool(draw_grid)
     self.grid_step_px = helpers._to_int(grid_step_px, default=50) or 50
@@ -453,20 +459,34 @@ class DetectorRT:
         # Per Numpy 1.25+: explicitly extract scalars from 1x1 arrays
         denom = float((n.T @ ray_dir).item())
         numer = float((n.T @ p0).item())
+
         # Per Numpy 1.25+: near-parallel ray/plane or non-finite values
         if np.isfinite(denom) and abs(denom) > 1e-6 and np.isfinite(numer):
           s = numer / denom
           Pc = s * ray_dir  # intersection in camera frame
           # Convert to marker frame: X_m = R^T (Pc - tvec)
           Xm = R.T @ (Pc - tvec)
-          dX = float(Xm[0,0])
-          dY = float(Xm[1,0])
+
+          # estimate planar intersection in marker frame -> (dX,dY)
+          # Apply outlier gating + EMA smoothing to reduce pose jitter
+          dm = np.array([float(Xm[0,0]), float(Xm[1,0])], dtype=float)
+          dm_norm = float(np.linalg.norm(dm))
+
+          if self._dm_prev is not None:
+            step = float(np.linalg.norm(dm - self._dm_prev))
+            if dm_norm > self._dm_ok_norm or step > self._dm_max_step:
+              dm = self._dm_prev  # hold last good
+            else:
+              dm = (1.0 - self._dm_ema) * self._dm_prev + self._dm_ema * dm
+
+          self._dm_prev = dm
+          dX, dY = float(dm[0]), float(dm[1])
           metric_txt = f"  dM=({dX:.3f}m,{dY:.3f}m)"
         else:
           metric_txt = "  dM=(n/a)"
       except Exception as e:
         metric_txt = "  dM=(n/a)"
-        _logfmt("metric_delta_error", level=logging.DEBUG, err=str(e))
+        _logfmt("metric_delta_error", level=logging.ERROR, err=str(e))
 
     cv2.putText(frame, label + metric_txt, (click_x + 8, click_y - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255,255,255), 2, cv2.LINE_AA)
 
