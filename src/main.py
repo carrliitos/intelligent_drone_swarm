@@ -146,26 +146,7 @@ def run(connection_type, use_vision=False, use_control=False, swarm_uris=None):
       vision_thread.start()
 
       if use_control:
-        logger.info("==========Control-loop open==========")
-        ctrl_stop = threading.Event()
-        def _ctrl_loop():
-          try:
-            command.follow_target_servo(
-              detector=detector,
-              stop_event=ctrl_stop,
-              start_event=command.ibvs_enable_event,
-              loop_hz=50,
-              gains=dict(Kpx=0.6, Kdx=0.2,
-                         Kpy=0.6, Kdy=0.2,
-                         Kpz=1.0, Kiz=0.2,
-                         Kpyaw=2.0, Kdyaw=0.3),
-              vision_yaw_alpha=0.05,
-              forward_nudge_alpha=0.03
-            )
-          except Exception as e:
-            logger.error(f"Servo error: {e}")
-        ctrl_thread = threading.Thread(target=_ctrl_loop, daemon=True)
-        ctrl_thread.start()
+        logger.info("Click-to-Go armed (press G/S to take off, then click in the video).")
 
     time.sleep(5.0)
 
@@ -178,10 +159,6 @@ def run(connection_type, use_vision=False, use_control=False, swarm_uris=None):
     logger.error(f"Error: {e}")
     sys.exit(1)
   finally:
-    # stop control/vision loops first
-    if 'ctrl_stop' in locals(): ctrl_stop.set()
-    if 'ctrl_thread' in locals(): ctrl_thread.join(timeout=2.0)
-
     if detector:
       stop_vision.set()
       if vision_thread: vision_thread.join(timeout=2.0)
@@ -197,13 +174,13 @@ def run(connection_type, use_vision=False, use_control=False, swarm_uris=None):
 
 def print_usage():
   print("Usage:")
-  print("  fly udp [vision] [control]")
-  print("  fly radio <7|8|9> [vision] [control]")
+  print("  fly udp [vision] [control] [waypoint]")
+  print("  fly radio <7|8|9> [vision] [control] [waypoint]")
   print("  fly swarm <channels ...>  # e.g., swarm 7 8 9  (not shown here)")
   print("Notes:")
   print("  - 'vision' starts the ArUco webcam preview thread")
-  print("  - 'control' starts the IBVS control loop (requires 'vision')")
-  print("  - 'waypoint' enables click -> waypoint logging HUD/JSONL")
+  print("  - 'control' enables click-to-go (requires 'vision')")
+  print("  - 'waypoint' enables click logging (HUD + JSONL); click-to-go works either way")
   sys.exit(1)
 
 def cli():
@@ -277,7 +254,12 @@ def cli():
   else:
     os.environ["WAYPOINT_LOGGING"] = WAYPOINT_ENV_DEFAULT
 
-  logger.info(f"Using connection: {connection_type}  | vision={use_vision} control={use_control}")
+  if use_control:
+    os.environ["IBVS_MODE"] = "click2go"
+  else:
+    os.environ.pop("IBVS_MODE", None)
+
+  logger.info(f"Using connection: {connection_type}  | vision={use_vision} control={use_control} mode={os.getenv('IBVS_MODE','-')}")
   run(connection_type, use_vision=use_vision, use_control=use_control)
 
 if __name__ == '__main__':
