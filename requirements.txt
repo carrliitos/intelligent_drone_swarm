@@ -26,7 +26,7 @@ httpcore==1.0.9
 httpx==0.28.1
 idna==3.11
 importlib_resources==6.5.2
--e git+ssh://git@github.com/carrliitos/intelligent_drone_swarm.git@d063ddcc0815134d7b8e823e1ae022e1722f84f5#egg=intelligent_drone_swarm
+-e git+ssh://git@github.com/carrliitos/intelligent_drone_swarm.git@2c70958b79c60d587cdb85ddc810455b3123e8ab#egg=intelligent_drone_swarm
 ipykernel==7.0.1
 ipython==8.37.0
 isoduration==20.11.0
