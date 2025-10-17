@@ -2,14 +2,15 @@ import io
 import math
 import time
 import os
-import pandas as pd
 import sys
 import pygame
 import threading
-import numpy as np
 import importlib
 import warnings
 import json
+import cv2
+import pandas as pd
+import numpy as np
 import datetime as _dt
 from pathlib import Path
 from collections import deque
@@ -142,6 +143,24 @@ class Command:
     override = (os.getenv("WAYPOINT_LOG_FILE") or "").strip()
     self.wp_path = Path(override) if override else (data / f"waypoints-{stamp}.jsonl")
 
+    # Click-to-Go controller config (env/CLI)
+    self.c2g_rate_hz = helpers._f(os.getenv("CLICK2GO_RATE_HZ"), default=25.0)
+    self.c2g_tol_m = helpers._f(os.getenv("CLICK2GO_TOL_M"), default=0.06)
+    self.c2g_max_speed = helpers._f(os.getenv("CLICK2GO_MAX_SPEED"), default=0.50)
+    self.c2g_slew = helpers._f(os.getenv("CLICK2GO_VEL_SLEW"), default=0.80)  # m/s per second (per axis)
+    self.c2g_kx = helpers._f(os.getenv("CLICK2GO_KX"), default=0.8)
+    self.c2g_ky = helpers._f(os.getenv("CLICK2GO_KY"), default=0.8)
+    self.c2g_tag_lossN = int(helpers._f(os.getenv("CLICK2GO_TAG_LOSS_FRAMES"), default=10))
+    self.c2g_n_consec = int(helpers._f(os.getenv("CLICK2GO_N_CONSEC"), default=4))
+    self.c2g_timeout_s = helpers._f(os.getenv("CLICK2GO_TIMEOUT_S"), default=12.0)
+
+    # Click-to-Go runtime state
+    self._c2g_thread = None
+    self._c2g_stop = threading.Event()
+    self._c2g_active = False
+    self._c2g_last = {"fx": None, "fy": None, "t": 0.0}
+    self._c2g_debounce_s = 0.4
+
     # waypoints (thread-safe)
     self._waypoints: list[Waypoint] = []
     self._wp_lock = threading.Lock()
@@ -155,6 +174,42 @@ class Command:
   def _wrap_pi(a):
     # wrap to [-pi, pi)
     return (a + math.pi) % (2.0 * math.pi) - math.pi
+
+  @staticmethod
+  def _project_with_pose(u_px: int, v_px: int,
+                         K, D,
+                         rvec, tvec):
+    """
+    Project pixel (u,v) to the Z=0 plane of the current marker frame defined by (rvec,tvec).
+    Returns (-1, X, Y) where X,Y are in meters in that marker frame. (-1) = unknown id.
+    """
+    K = np.asarray(K, dtype=float)
+    D = np.zeros((5, 1), dtype=float) if D is None else np.asarray(D, dtype=float)
+    rvec = np.asarray(rvec, dtype=float).reshape(3, 1)
+    tvec = np.asarray(tvec, dtype=float).reshape(3, 1)
+
+    R, _ = cv2.Rodrigues(rvec)              # marker->camera
+    n = R @ np.array([[0.0], [0.0], [1.0]]) # plane normal in camera frame
+    p0 = tvec
+    uv = np.array([[[float(u_px), float(v_px)]]], dtype=np.float32)
+    und = cv2.undistortPoints(uv, K, D, P=K)
+    ray = np.array([[und[0, 0, 0]], [und[0, 0, 1]], [1.0]], dtype=np.float64)
+    ray = ray / np.linalg.norm(ray)
+    denom = float((n.T @ ray).item())
+    numer = float((n.T @ p0).item())
+
+    if not (math.isfinite(denom) and abs(denom) > 1e-6 and math.isfinite(numer)):
+      return None
+
+    s = numer / denom
+
+    if s <= 0:
+      return None
+
+    Pc = s * ray
+    Xm = R.T @ (Pc - tvec) # camera->marker
+
+    return (-1, float(Xm[0, 0]), float(Xm[1, 0]))
 
   def _get_detector(self):
     import importlib, sys
@@ -259,6 +314,189 @@ class Command:
           f.write(json.dumps(rec, separators=(",", ":")) + "\n")
       except Exception as e:
         logger.warning(f"Waypoint log write failed: {e}")
+
+  def start_click_to_go(self, fx: int, fy: int):
+    """
+    Start/replace a closed-loop click-to-go controller that recomputes the metric
+    error (X,Y) from the *current* detector pose each tick and drives until ‖e‖ < tol.
+
+    fx, fy: click coordinates in detector frame pixels (e.g., 1280x720)
+    """
+    now = time.time()
+
+    # Debounce: same click within debounce window? ignore
+    if (self._c2g_last["fx"], self._c2g_last["fy"]) == (fx, fy) and (now - self._c2g_last["t"]) < self._c2g_debounce_s:
+      logger.debug(f"click2go: debounced duplicate click ({fx},{fy})")
+      return
+
+    # If active and the new point is the same (±3 px), ignore
+    if self._c2g_active and self._c2g_last["fx"] is not None:
+      if abs(self._c2g_last["fx"] - fx) <= 3 and abs(self._c2g_last["fy"] - fy) <= 3:
+        logger.debug("click2go: same target; controller already running")
+        return
+
+    # Stop any existing controller
+    try:
+      if self._c2g_thread and self._c2g_thread.is_alive():
+        self._c2g_stop.set()
+        self._c2g_thread.join(timeout=0.5)
+    except Exception:
+      pass
+
+    self._c2g_stop = threading.Event()
+    t = threading.Thread(target=self._run_click_to_go,
+                         args=(int(fx), int(fy), self._c2g_stop),
+                         daemon=True)
+
+    self._c2g_thread = t
+    self._c2g_active = True
+    self._c2g_last = {"fx": fx, "fy": fy, "t": now}
+    t.start()
+    logger.info(f"click2go: started controller for click frame=({fx},{fy})")
+
+  def _run_click_to_go(self, fx: int, fy: int, stop_event: threading.Event):
+    det = self._get_detector()
+    if det is None:
+      logger.warning("click2go: no detector; aborting.")
+      self._c2g_active = False
+      return
+
+    # Create MotionCommander if needed (will only move if already flying)
+    mover = getattr(self, "mc", None)
+    if mover is None:
+      try:
+        self.mc = MotionCommander(self.scf)
+        mover = self.mc
+      except Exception as e:
+        logger.debug(f"click2go: could not create MotionCommander: {e}")
+
+    hz = max(5.0, float(self.c2g_rate_hz))
+    dt = 1.0 / hz
+    vmax = float(self.c2g_max_speed)
+    slew = float(self.c2g_slew)
+    tol = float(self.c2g_tol_m)
+    kx, ky = float(self.c2g_kx), float(self.c2g_ky)
+    lossN = int(self.c2g_tag_lossN)
+    needN = int(self.c2g_n_consec)
+    timeout_s = float(self.c2g_timeout_s)
+
+    consec_ok = 0
+    loss_ctr  = 0
+    prev_vx = prev_vy = 0.0
+    t0 = time.time()
+
+    def _slew(prev, target):
+      step = slew * dt
+      dv = target - prev
+
+      if dv >  step: 
+        return prev + step
+
+      if dv < -step: 
+        return prev - step
+
+      return target
+
+    stop_reason = "unknown"
+    while not stop_event.is_set():
+      if (time.time() - t0) > timeout_s:
+        logger.info("click2go: timeout; stopping.")
+        break
+
+      # Latest vision results
+      try:
+        _, res = det.latest()
+      except Exception:
+        res = None
+
+      if res is None:
+        loss_ctr += 1
+        try:
+          if mover and getattr(mover, "_is_flying", False):
+            mover.start_linear_motion(0.0, 0.0, 0.0)
+        except Exception:
+          pass
+        if loss_ctr >= lossN:
+          stop_reason = "loss"
+          logger.info("click2go: tag loss threshold reached; abort.")
+          break
+        time.sleep(dt)
+        continue
+
+      # Recompute metric target *now* from the stored click point.
+      # 1) Try with full results (ids/corners/rvecs/tvecs) -> nearest marker plane
+      # 2) If missing pose this frame, fall back to cached (K, rvec, tvec) and project directly in that marker’s frame.
+      out = None
+      try:
+        if res:
+          out = det.pixel_to_marker_xy(fx, fy, res)
+      except Exception:
+        out = None
+
+      if not out:
+        pose = getattr(det, "latest_pose", lambda: None)()
+
+        if pose is None:
+          loss_ctr += 1
+          time.sleep(dt)
+          continue
+        K, rvec, tvec = pose
+
+        try:
+          out = self._project_with_pose(fx, fy, K, det.dist_coeffs, rvec, tvec)
+        except Exception:
+          out = None
+
+      if not out:
+        loss_ctr += 1
+        time.sleep(dt)
+        continue
+
+      loss_ctr = 0
+      _, ex, ey = out    # meters in marker frame (marker center ~ (0,0))
+      err = math.hypot(ex, ey)
+
+      if err < tol:
+        consec_ok += 1
+        if consec_ok >= needN:
+          stop_reason = f"success (‖e‖={err:.3f} m)"
+          logger.info(f"click2go: reached target ‖e‖={err:.3f} m")
+          break
+      else:
+        consec_ok = 0
+
+      # Map to MotionCommander body frame (reuse established sign flip)
+      vx = -(kx * ex)
+      vy = -(ky * ey)
+
+      # Clamp
+      mag = math.hypot(vx, vy)
+      if mag > vmax and mag > 1e-6:
+        s = vmax / mag
+        vx *= s; vy *= s
+
+      # Slew
+      vx = _slew(prev_vx, vx)
+      vy = _slew(prev_vy, vy)
+      prev_vx, prev_vy = vx, vy
+
+      # Command (keep altitude fixed)
+      try:
+        if mover and getattr(mover, "_is_flying", False):
+          mover.start_linear_motion(vx, vy, 0.0)
+      except Exception as e:
+        logger.debug(f"click2go: motion command failed: {e}")
+
+      time.sleep(dt)
+
+    # Stop & clear
+    try:
+      if mover and getattr(mover, "_is_flying", False):
+        mover.stop()
+    except Exception:
+      pass
+    self._c2g_active = False
+    logger.info(f"click2go: controller stopped. reason={stop_reason}")
 
   def _draw_waypoints_on_video(self, surface: "pygame.Surface", last_draw: dict, color=(255,200,80)):
     """
@@ -650,6 +888,13 @@ class Command:
                 # Log waypoint (no command dispatch)
                 try:
                   self._append_waypoint(mx, my, fx, fy)
+
+                  # Start closed-loop controller for this click
+                  if fx is not None and fy is not None:
+                    try:
+                      self.start_click_to_go(fx, fy)
+                    except Exception as e:
+                      logger.debug(f"click2go: failed to start: {e}")
                 except Exception as e:
                   logger.debug(f"waypoint append failed: {e}")
               else:

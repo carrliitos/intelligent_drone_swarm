@@ -201,6 +201,9 @@ class DetectorRT:
       self.camera_matrix, self.dist_coeffs = helpers._load_calibration(calib_path)
       self._do_pose = True
 
+    # cache last full detection result so control can tolerate pose gaps
+    self._last_results = None 
+
     # OpenCV ArUco Setup
     if self.dictionary_name not in self._DICT_NAME_TO_ENUM:
       raise ValueError(f"Unsupported dictionary: '{raw_dict}'. "
@@ -308,6 +311,27 @@ class DetectorRT:
       size = min(w, h) // 20
       cv2.line(frame, (cx - size, cy), (cx + size, cy), self.grid_color, self.grid_thickness + 1, cv2.LINE_AA)
       cv2.line(frame, (cx, cy - size), (cx, cy + size), self.grid_color, self.grid_thickness + 1, cv2.LINE_AA)
+
+  def latest_pose(self):
+    """
+    Return (K, rvec, tvec) for the most recent pose, or None if unavailable.
+    """
+    res = getattr(self, "_last_results", None) or {}
+    rvecs = res.get("rvecs")
+    tvecs = res.get("tvecs")
+
+    if rvecs is None or tvecs is None or len(rvecs) == 0:
+      return None
+
+    # Use first detected marker’s pose (matches your other helpers)
+    K = self.camera_matrix
+    rvec = np.asarray(rvecs[0]).reshape(3, 1)
+    tvec = np.asarray(tvecs[0]).reshape(3, 1)
+
+    if K is None:
+      return None
+
+    return (K, rvec, tvec)
 
   def set_click_point(self, x: int, y: int):
     with self._click_lock:
@@ -779,15 +803,23 @@ class DetectorRT:
       "fps": self._fps_display
     }
 
+    # Single-tag pose snapshot
+    if self._do_pose and rvecs is not None and len(rvecs) > 0:
+      results["K"] = self.camera_matrix
+      results["rvec"] = rvecs[0].reshape(3, 1)
+      results["tvec"] = tvecs[0].reshape(3, 1)
+
     # Overlays
     self._overlay_grid(frame)
     self._overlay_click_delta(frame, results)
     self._mark_occupied(frame) # Highlight the occupied cells and then draw grid
+
+    # Update public + cached results (pose snapshot included above if available)
     self.last_results = results
+    self._last_results = results
 
     with self._latest_lock:
       self._latest_frame = frame.copy()   # small cost; safe for readers
-    self.last_results = results
 
     # Occasional detection summary (every LOG_IDS_EVERY frames)
     if (self.stats["frames"] % LOG_IDS_EVERY) == 0:
