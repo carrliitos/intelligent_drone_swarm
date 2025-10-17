@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires = ["setuptools>=68,<81", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -18,7 +18,8 @@ dependencies = [
   "scipy",
   "watchdog",
   "pandas",
-  "pygame"
+  "pygame",
+  "setuptools>=68,<81"
 ]
 description = "UW-Whitewater MSCS Capstone: Drone Swarm Coordination System"
 readme = "README.md"
