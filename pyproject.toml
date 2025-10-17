@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires = ["setuptools>=68,<81", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "intelligent-drone-swarm"
-version = "2.4.0"
+version = "3.1.0"
 requires-python = ">=3.10"
 dependencies = [
   "cflib",
@@ -12,14 +12,15 @@ dependencies = [
   "python-dotenv",
   "importlib_resources",
   "libusb-package",
-  "numpy",
-  "opencv-contrib-python",
-  "opencv-python",
+  "numpy==2.2.6",
+  "opencv-contrib-python==4.12.0.88",
   "packaging",
   "scipy",
   "watchdog",
   "pandas",
-  "pygame"
+  "pygame",
+  "setuptools>=68,<81",
+  "notebook==7.4.7"
 ]
 description = "UW-Whitewater MSCS Capstone: Drone Swarm Coordination System"
 readme = "README.md"

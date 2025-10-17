@@ -131,11 +131,20 @@ class DetectorRT:
     raw_dict = dictionary or "4x4_1000"
     self.dictionary_name = helpers._normalize_dict_name(raw_dict)
 
-    # camera index
-    cam_idx = helpers._to_int(camera, default=0)
-    if cam_idx is None:
-      cam_idx = 0
-    self.camera_index = cam_idx
+    # camera source: support either int index or URL
+    # - If camera looks like an int (e.g., "0"), use local webcam index
+    # - Otherwise treat as a literal source
+    self.camera_source_raw = camera
+    self.camera_url: Optional[str] = None
+    self.camera_index: Optional[int] = None
+    try:
+      if camera is None:
+        self.camera_index = 0
+      else:
+        self.camera_index = int(str(camera))
+    except (TypeError, ValueError):
+      self.camera_index = None
+      self.camera_url = str(camera) if camera else None
 
     # image settings (None means "do not force-set"; set only if not None)
     self.width = helpers._to_int(width, default=None)
@@ -144,6 +153,15 @@ class DetectorRT:
 
     self.window_title = window_title or "ArUco Detector"
     self.draw_axes = bool(draw_axes)
+
+    # Low-latency controls
+    self.stream_backend = (os.getenv("STREAM_BACKEND") or "auto").lower()  # auto|ffmpeg|gstreamer
+    self.low_latency = bool(int(os.getenv("STREAM_LOW_LATENCY", "1")))
+    self.flush_grabs = helpers._to_int(os.getenv("STREAM_FLUSH_GRABS"), default=0) or 0
+
+    # rate-limit heavy processing
+    self.max_proc_fps = helpers._to_float(os.getenv("MAX_PROC_FPS"), default=0.0) or 0.0
+    self._last_proc_ts = 0.0
 
     ids = helpers._to_ids(allowed_ids)
     self.allowed_ids = set(ids) if ids else None
@@ -182,6 +200,9 @@ class DetectorRT:
     if calib_path is not None and self.marker_length_m is not None:
       self.camera_matrix, self.dist_coeffs = helpers._load_calibration(calib_path)
       self._do_pose = True
+
+    # cache last full detection result so control can tolerate pose gaps
+    self._last_results = None 
 
     # OpenCV ArUco Setup
     if self.dictionary_name not in self._DICT_NAME_TO_ENUM:
@@ -290,6 +311,27 @@ class DetectorRT:
       size = min(w, h) // 20
       cv2.line(frame, (cx - size, cy), (cx + size, cy), self.grid_color, self.grid_thickness + 1, cv2.LINE_AA)
       cv2.line(frame, (cx, cy - size), (cx, cy + size), self.grid_color, self.grid_thickness + 1, cv2.LINE_AA)
+
+  def latest_pose(self):
+    """
+    Return (K, rvec, tvec) for the most recent pose, or None if unavailable.
+    """
+    res = getattr(self, "_last_results", None) or {}
+    rvecs = res.get("rvecs")
+    tvecs = res.get("tvecs")
+
+    if rvecs is None or tvecs is None or len(rvecs) == 0:
+      return None
+
+    # Use first detected marker’s pose (matches your other helpers)
+    K = self.camera_matrix
+    rvec = np.asarray(rvecs[0]).reshape(3, 1)
+    tvec = np.asarray(tvecs[0]).reshape(3, 1)
+
+    if K is None:
+      return None
+
+    return (K, rvec, tvec)
 
   def set_click_point(self, x: int, y: int):
     with self._click_lock:
@@ -456,71 +498,110 @@ class DetectorRT:
         logger.warning("DetectorRT.open() called but camera is already open; ignoring.")
         return
 
-      def _try_open(width, height, fps, fourcc=None):
-        cap = cv2.VideoCapture(self.camera_index, cv2.CAP_V4L2)
+      def _try_open_index(idx, width, height, fps, fourcc=None):
+        cap = cv2.VideoCapture(int(idx))
+        if not cap.isOpened():
+          return None
+
+        try:
+          if fourcc is not None:
+            cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*fourcc))
+
+          if width:
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, int(width))
+
+          if height:
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, int(height))
+
+          if fps:
+            cap.set(cv2.CAP_PROP_FPS, int(fps))
+
+          cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # reduce latency for webcams too
+          cap.set(cv2.CAP_PROP_CONVERT_RGB, 1)
+        except Exception:
+          pass
+        return cap
+
+      def _try_open_url(url):
+        # For IP streams (DroidCam), we avoid forcing width/height/fps—
+        # the producer decides. Use a small buffer to cut latency.
+        backend = None
+        if self.stream_backend == "ffmpeg":
+          backend = cv2.CAP_FFMPEG
+        elif self.stream_backend == "gstreamer":
+          # GStreamer pipeline: https://gstreamer.freedesktop.org/documentation/tutorials/basic/dynamic-pipelines.html?gi-language=c
+          pipeline = (f"souphttpsrc location={url} is-live=true ! "
+                       "jpegdec ! videoconvert ! "
+                       "appsink drop=true max-buffers=1 sync=false")
+          cap = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
+          return cap if cap.isOpened() else None
+
+        cap = cv2.VideoCapture(url, backend) if backend is not None else cv2.VideoCapture(url)
 
         if not cap.isOpened():
           return None
 
-        if fourcc is not None:
-          cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*fourcc))
-
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
-        cap.set(cv2.CAP_PROP_FPS, fps)
-        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1) # low latency
-        cap.set(cv2.CAP_PROP_CONVERT_RGB, 1)
-
-        # Prefer AUTO exposure that V4L2 actually honors (0.75 commonly maps to AUTO)
-        cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.75)
-        cap.set(cv2.CAP_PROP_AUTO_WB, 1)
+        try:
+          if self.low_latency:
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # tiny queue
+        except Exception:
+          pass
         return cap
 
-      _logfmt("camera_open_begin", camera_index=self.camera_index)
+      if self.camera_url:
+        _logfmt("camera_open_begin", source="url", url=self.camera_url)
+      else:
+        _logfmt("camera_open_begin", source="index", camera_index=self.camera_index)
 
-      attempts = [
-        (self.width, self.height, self.fps, 'MJPG'), # requested (e.g., 1280x720@30 MJPG)
-        (1280, 720, 30, 'MJPG'),                     # UVC default profile
-        (640, 480, 30, 'MJPG'),                      # lower-res MJPG (keeps JPEG decode path)
-        (640, 480, 30, None),                        # fallback
-        (640, 480, 30, 'YUYV'),                      # uncompressed fallback (full FPS at VGA)
-      ]
+      if self.camera_url:
+        self.cap = _try_open_url(self.camera_url)
+        if self.cap is None:
+          _logfmt("camera_open_failed", level=logging.ERROR, reason="url_open_failed")
+          raise RuntimeError("Camera open failed (URL).")
+      else:
+        attempts = [
+          (self.width, self.height, self.fps, 'MJPG'), # requested (e.g., 1280x720@30 MJPG)
+          (1280, 720, 30, 'MJPG'),                     # UVC default profile
+          (640, 480, 30, 'MJPG'),                      # lower-res MJPG (keeps JPEG decode path)
+          (640, 480, 30, None),                        # fallback
+          (640, 480, 30, 'YUYV'),                      # uncompressed fallback (full FPS at VGA)
+        ]
 
-      self.cap = None
-      attempt_no = 0
+        self.cap = None
+        attempt_no = 0
 
-      for (w, h, fps, fcc) in attempts:
-        attempt_no += 1
-        _logfmt("camera_try", attempt=attempt_no, width=w, height=h, fps=fps, fourcc=(fcc or "RAW"))
-        cap = _try_open(w, h, fps, fcc)
-        if cap is None:
-          _logfmt("camera_try_failed_open", attempt=attempt_no, reason="cap_not_open", level=logging.warning)
-          continue
+        for (w, h, fps, fcc) in attempts:
+          attempt_no += 1
+          _logfmt("camera_try", attempt=attempt_no, width=w, height=h, fps=fps, fourcc=(fcc or "RAW"))
+          cap = _try_open_index(self.camera_index or 0, w, h, fps, fcc)
+          if cap is None:
+            _logfmt("camera_try_failed_open", attempt=attempt_no, reason="cap_not_open", level=logging.WARNING)
+            continue
 
-        # Warm-up + “not black” check
-        ok_count, t0 = 0, time.time()
-        while time.time() - t0 < 2.0:
-          with suppress_stderr():
-            ok, frm = cap.read()
-          if ok and frm is not None and frm.mean() > self.min_brightness:
-            ok_count += 1
-            if ok_count >= 3:
-              self.cap = cap
-              self.width, self.height, self.fps = w, h, fps
-              _logfmt("camera_try_success", attempt=attempt_no, warmup_frames=ok_count)
-              break
-          time.sleep(0.01)
+          # Warm-up + “not black” check
+          ok_count, t0 = 0, time.time()
+          while time.time() - t0 < 2.0:
+            with suppress_stderr():
+              ok, frm = cap.read()
+            if ok and frm is not None and frm.mean() > self.min_brightness:
+              ok_count += 1
+              if ok_count >= 3:
+                self.cap = cap
+                self.width, self.height, self.fps = w, h, fps
+                _logfmt("camera_try_success", attempt=attempt_no, warmup_frames=ok_count)
+                break
+            time.sleep(0.01)
 
-        if self.cap is not None:
-          break
+          if self.cap is not None:
+            break
 
-        _logfmt("camera_try_failed_warmup", attempt=attempt_no, warmup_ok=ok_count, level=logging.WARNING)
-        cap.release()
+          _logfmt("camera_try_failed_warmup", attempt=attempt_no, warmup_ok=ok_count, level=logging.WARNING)
+          cap.release()
 
-      if self.cap is None:
-        logger.error("Could not open camera after multiple attempts.")
-        _logfmt("camera_open_failed", level=logging.ERROR)
-        raise RuntimeError("Camera open failed.")
+        if self.cap is None:
+          logger.error("Could not open camera after multiple attempts.")
+          _logfmt("camera_open_failed", level=logging.ERROR)
+          raise RuntimeError("Camera open failed.")
 
       got_w = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
       got_h = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
@@ -584,9 +665,32 @@ class DetectorRT:
       logger.error("Call open() before read().")
       raise RuntimeError("Call open() before read().")
 
+    if self.max_proc_fps > 0.0:
+      now_ts = time.time()
+      min_dt = 1.0 / max(1e-6, float(self.max_proc_fps))
+
+      if (now_ts - self._last_proc_ts) < min_dt:
+        with self._latest_lock:
+          frame = None if self._latest_frame is None else self._latest_frame.copy()
+        return (frame, self.last_results if frame is not None else {})
+
+      self._last_proc_ts = now_ts
+
+    # Always try to read the freshest frame; flush a few with grab() then retrieve once.
     with self._cap_lock:
       with suppress_stderr():
-        ok, frame = self.cap.read()
+        if self.flush_grabs > 0:
+          # Drain N stale frames (cheap, decode happens on retrieve())
+          for _ in range(self.flush_grabs):
+            self.cap.grab()
+
+          ok = self.cap.grab()
+          frame = None
+
+          if ok:
+            ok, frame = self.cap.retrieve()
+        else:
+          ok, frame = self.cap.read()
 
     if not ok or frame is None:
       self.stats["read_failures"] += 1
@@ -699,15 +803,23 @@ class DetectorRT:
       "fps": self._fps_display
     }
 
+    # Single-tag pose snapshot
+    if self._do_pose and rvecs is not None and len(rvecs) > 0:
+      results["K"] = self.camera_matrix
+      results["rvec"] = rvecs[0].reshape(3, 1)
+      results["tvec"] = tvecs[0].reshape(3, 1)
+
     # Overlays
     self._overlay_grid(frame)
     self._overlay_click_delta(frame, results)
     self._mark_occupied(frame) # Highlight the occupied cells and then draw grid
+
+    # Update public + cached results (pose snapshot included above if available)
     self.last_results = results
+    self._last_results = results
 
     with self._latest_lock:
       self._latest_frame = frame.copy()   # small cost; safe for readers
-    self.last_results = results
 
     # Occasional detection summary (every LOG_IDS_EVERY frames)
     if (self.stats["frames"] % LOG_IDS_EVERY) == 0:
@@ -769,6 +881,66 @@ class DetectorRT:
       "tvecs": tvecs,
       "dist_m": dists,
     }
+
+  def pixel_to_marker_xy(self, x: int, y: int, results: Optional[Dict[str, Any]] = None) -> Optional[Tuple[int, float, float]]:
+    """
+    Project pixel (x,y) to the Z=0 plane of the nearest detected marker and
+    return (marker_id, X, Y) in that marker's local frame. Requires pose.
+    Returns None if intrinsics/pose are unavailable or no suitable marker.
+    """
+    if self.camera_matrix is None:
+      return None
+
+    res = results if results is not None else self.last_results
+
+    if not res:
+      return None
+
+    corners = res.get("corners")
+    ids = res.get("ids")
+    rvecs = res.get("rvecs")
+    tvecs = res.get("tvecs")
+
+    if corners is None or ids is None or rvecs is None or tvecs is None:
+      return None
+
+    chosen = self._nearest_marker_to_point(corners, ids, (x, y))
+
+    if chosen is None:
+      return None
+
+    idx, mid, cx, cy = chosen
+
+    try:
+      # intrinsics
+      K = self.camera_matrix
+      D = self.dist_coeffs if self.dist_coeffs is not None else np.zeros((5,1))
+
+      # marker pose (marker -> camera)
+      rvec = rvecs[idx].reshape(3,1)
+      tvec = tvecs[idx].reshape(3,1)
+      R,_ = cv2.Rodrigues(rvec)
+      n = R @ np.array([[0.0],[0.0],[1.0]])  # marker plane normal in camera frame
+      p0 = tvec                              # a point on the plane (marker origin)
+
+      uv = np.array([[[float(x), float(y)]]], dtype=np.float32)
+      und = cv2.undistortPoints(uv, K, D, P=K)
+      ray = np.array([[und[0,0,0]],[und[0,0,1]],[1.0]], dtype=np.float64)
+      ray = ray / np.linalg.norm(ray)
+      denom = float((n.T @ ray).item())
+      numer = float((n.T @ p0).item())
+
+      if not (np.isfinite(denom) and abs(denom) > 1e-6 and np.isfinite(numer)):
+        return None
+
+      s = numer / denom
+      Pc = s * ray           # intersection in camera frame
+      Xm = R.T @ (Pc - tvec) # to marker frame
+
+      return int(mid), float(Xm[0,0]), float(Xm[1,0])
+    except Exception as e:
+      logger.error(f"No pixel_to_marker_xy: {e}")
+      return None
 
 def primary_target(results, frame_shape):
   """

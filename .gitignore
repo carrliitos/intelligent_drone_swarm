@@ -5,6 +5,8 @@ archive/*
 cache/*
 !cache/.gitkeep
 data/*.csv
+data/*.jsonl
+data/*.json
 !data/.gitkeep
 data/figs/*.png
 !data/figs/.gitkeep

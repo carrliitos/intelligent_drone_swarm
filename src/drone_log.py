@@ -6,6 +6,7 @@ import pandas as pd
 import datetime
 import contextlib
 
+from datetime import datetime
 from pathlib import Path
 from cflib.crazyflie.log import LogConfig
 from utils import logger, context
@@ -78,17 +79,21 @@ class DroneLogs:
     self.kalman_varPY = 0.0
     self.kalman_varPZ = 0.0
 
+    self.sys_canfly = 0
+    self.sys_isFlying = 0
+    self.sys_isTumbled = 0
+
     self._write_logs()
 
   def _write_logs(self):
     """
     Continuously write drone data to a CSV file in the background.
     """
-    curr_time = datetime.datetime.now().strftime("%H-%M-%S")
     log_path = f"{directory}/data/telemetry_log.csv"
 
     columns = [
         "timestamp",
+        "sys_canfly", "sys_isFlying", "sys_isTumbled",
         "thrust", "roll", "pitch", "yaw",
         "stateEstimate_x", "stateEstimate_y", "stateEstimate_z",
         "stateEstimate_vx", "stateEstimate_vy", "stateEstimate_vz",
@@ -110,7 +115,8 @@ class DroneLogs:
       while not self._stop_event.is_set():
         with self.lock:
           row = [
-              time.time(),
+              datetime.fromtimestamp(time.time()),
+              self.sys_canfly, self.sys_isFlying, self.sys_isTumbled,
               self.thrust, self.roll, self.pitch, self.yaw,
               self.stateEstimate_x, self.stateEstimate_y, self.stateEstimate_z,
               self.stateEstimate_vx, self.stateEstimate_vy, self.stateEstimate_vz,
@@ -149,6 +155,7 @@ class DroneLogs:
 
     # Start logging in separate threads
     self._stop_event.clear()
+    sys_logs = threading.Thread(target=self._sys_logs, daemon=True)
     battery_logs = threading.Thread(target=self._battery_logs, daemon=True)
     gyro_states_logs = threading.Thread(target=self._gyro_states, daemon=True)
     controller_logs = threading.Thread(target=self._control_states, daemon=True)
@@ -162,6 +169,7 @@ class DroneLogs:
     state_estimates_kalman_logs = threading.Thread(target=self._stateEstimate_kalman, daemon=True)
 
     # Actually start logging
+    sys_logs.start()
     battery_logs.start()
     gyro_states_logs.start()
     controller_logs.start()
@@ -181,6 +189,8 @@ class DroneLogs:
     self._stop_event.set()
     logger.info("Stopping drone logging...")
 
+    if self.sys_log_config and self.sys_log_config.valid:
+      self.sys_log_config.stop()
     if self.battery_log_config and self.battery_log_config.valid:
       self.battery_log_config.stop()
     if self.gyro_log_config and self.gyro_log_config.valid:
@@ -475,6 +485,33 @@ class DroneLogs:
         self.gyro_log_config.stop()
         logger.info("Stopped Gyro logging.")
 
+  def _sys_logs(self):
+    """
+    Log system information from the Crazyflie.
+    """
+    self.sys_log_config = LogConfig(name="system", period_in_ms=500)
+
+    try:
+      self.sys_log_config.add_variable("sys.canfly", "uint8_t")
+      self.sys_log_config.add_variable("sys.isFlying", "uint8_t")
+      self.sys_log_config.add_variable("sys.isTumbled", "uint8_t")
+
+      self._cf.log.add_config(self.sys_log_config)
+      self.sys_log_config.data_received_cb.add_callback(self._log_callback__system)
+      self.sys_log_config.error_cb.add_callback(self._log_error_callback)
+      self.sys_log_config.start()
+
+      # Keep logging until the stop event is triggered
+      while self._cf and self._cf.state != 0 and not self._stop_event.is_set():
+        time.sleep(1)
+
+    except Exception as e:
+      logger.error(f"Unexpected error: {e}")
+    finally:
+      if self.sys_log_config and self.sys_log_config.valid:
+        self.sys_log_config.stop()
+        logger.info("Stopped system logging.")
+
   def _battery_logs(self):
     """
     Log battery information from the Crazyflie.
@@ -571,6 +608,13 @@ class DroneLogs:
       self.roll = data["stateEstimateZ.rateRoll"]
       self.pitch = data["stateEstimateZ.ratePitch"]
       self.yaw = data["stateEstimateZ.rateYaw"]
+
+  def _log_callback__system(self, timestamp, data, logconf):
+    """ Callback for system data. """
+    with self.lock:
+      self.sys_canfly = data["sys.canfly"]
+      self.sys_isFlying = data["sys.isFlying"]
+      self.sys_isTumbled = data["sys.isTumbled"]
 
   def _log_callback__power(self, timestamp, data, logconf):
     """ Callback for power management data. """
