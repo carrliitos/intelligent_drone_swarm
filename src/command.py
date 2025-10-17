@@ -20,7 +20,6 @@ load_dotenv(dotenv_path="config/.env")
 from cflib.crazyflie.log import LogConfig
 from cflib.crazyflie.syncLogger import SyncLogger
 from cflib.positioning.motion_commander import MotionCommander
-from cflib.crazyflie.commander import Commander
 
 from utils import context, helpers, logger as _logger
 from drone_connection import DroneConnection
@@ -113,31 +112,10 @@ class Command:
     self.max_wait_sec = 10.0  # hard cap per CF
 
     self.mc = None
-    self._use_commander = helpers._b(os.getenv("IBVS_USE_COMMANDER"), default=True)
-    self.cmdr = Commander(self.scf.cf) if self._use_commander else None
-    logger.info(f"IBVS backend: {'Commander' if self._use_commander else 'MotionCommander'}")
-    # Absolute Z target (meters) for Commander.send_hover_setpoint
-    self._z_target = float(takeoff_alt) if takeoff_alt is not None else 0.25
-    self._z_min = float(os.getenv("IBVS_Z_MIN", "0.10"))
-    self._z_max = float(os.getenv("IBVS_Z_MAX", "1.50"))
-
-    try:
-      self._z_sign = float(os.getenv("IBVS_Z_SIGN", "1"))
-      if self._z_sign == 0.0: 
-        self._z_sign = 1.0
-    except Exception: 
-      self._z_sign = 1.0
-
-    self._ibvs_ref_px = None   # (fx, fy) clicked pixel
-    self._ibvs_ref_area = None # desired area at click (keeps distance)
-    self.click2go_tol_px = helpers._to_int(os.getenv("CLICK2GO_TOL_PX"), default=8) or 8
-
     self.manual_active = False
     self.swarm_active = False
     self._l_was_down = False      # for 'L' edge detection
     self._g_was_down = False      # for 'G' edge detection (enter manual)
-    self._hold_active = False     # vision lost -> hover hold gate
-    self._hold_since = 0.0
     self._s_was_down = False      # for 'S' edge (enter swarm manual)
     self.speed_xy = 0.25          # m/s
     self.speed_z  = 0.25          # m/s
@@ -177,46 +155,6 @@ class Command:
   def _wrap_pi(a):
     # wrap to [-pi, pi)
     return (a + math.pi) % (2.0 * math.pi) - math.pi
-
-  def _send_body_motion(self, vx: float, vy: float, vz: float, rate_yaw: float, dt: float):
-    """
-    Stream body-frame velocity + yaw-rate.
-    If Commander is enabled: send_hover_setpoint(vx, vy, yawrate_deg, z_abs).
-    We integrate vz into the absolute z-distance target.
-    Fallback: MotionCommander.start_linear_motion(vx, vy, vz, rate_yaw).
-    """
-    try:
-      commander_enabled = self._use_commander and (self.cmdr is not None)
-      logger.debug(f"Commander is enabled: {commander_enabled}")
-
-      if self._use_commander and self.cmdr is not None:
-        # integrate Z target (clamped)
-        if not math.isnan(vz) and abs(vz) > 1e-6:
-          self._z_target = self._z_target + self._z_sign * float(vz) * float(dt)
-          self._z_target = min(self._z_max, max(self._z_min, self._z_target))
-          logger.debug(f"hover z_target={self._z_target:.2f} (vz={vz:.2f}, sign={self._z_sign})")
-        self.cmdr.send_hover_setpoint(float(vx), float(vy), float(rate_yaw), float(self._z_target))
-      else:
-        if self.mc is None:
-          self.mc = MotionCommander(self.scf, default_height=self.takeoff_alt or 0.25)
-        self.mc.start_linear_motion(float(vx), float(vy), float(vz), rate_yaw=float(rate_yaw))
-    except Exception as e:
-      logger.debug(f"_send_body_motion failed: {e}")
-
-  def _stop_body_motion(self):
-    """Graceful stop depending on backend."""
-    try:
-      if self._use_commander and self.cmdr is not None:
-        try:
-          self.cmdr.send_stop_setpoint()
-          self.cmdr.send_notify_setpoint_stop(0)
-        except Exception:
-          pass
-      else:
-        if self.mc:
-          self.mc.stop()
-    except Exception as e:
-      logger.debug(f"_stop_body_motion failed: {e}")
 
   def _get_detector(self):
     import importlib, sys
@@ -513,8 +451,7 @@ class Command:
 
     # Neutral hover if nothing is pressed
     if not moved:
-      # Stream a zero-velocity hover setpoint
-      self._send_body_motion(0.0, 0.0, 0.0, 0.0, 0.0)
+      self.mc.stop()
 
   def _go_swarm(self, keys):
     """
@@ -537,8 +474,6 @@ class Command:
     console_size = (520, 600)
 
     if _has_multiwin():
-      logger.info("Has dual-window.")
-
       # two real OS windows
       video_win = Window("Drone View", size=video_size, resizable=True)
       console_win = Window("Drone Console", size=console_size, resizable=True)
@@ -706,20 +641,6 @@ class Command:
               mapped = _map_click(mx, my)
               if mapped and self._vision_click:
                 fx, fy = mapped
-                self._ibvs_ref_px = (fx, fy)
-                try:
-                  det = self._get_detector()
-                  res = det.latest()[1] if det else None
-                  if res:
-                    # grab the current area as “distance” target
-                    tgt = det.primary_target(res, None) if hasattr(det, "primary_target") else None
-                    if tgt:
-                      _, _, area, *_ = tgt
-                      self._ibvs_ref_area = float(area)
-                except Exception:
-                  pass
-                logger.info(f"IBVS click-to-go: target set at (fx={fx:.1f}, fy={fy:.1f})")
-
                 # Forward to detector (will draw crosshair + delta on next frame)
                 try:
                   self._vision_click(fx, fy)
@@ -760,13 +681,6 @@ class Command:
                   if det:
                     det.clear_click()
                 logger.info("Cleared click-delta point (C).")
-
-                # Also stop any residual motion on cancel
-                self._stop_body_motion()
-                self._ibvs_ref_px = None
-                self._ibvs_ref_area = None
-                self._hold_active = False
-                logger.info("IBVS click-to-go: target cleared.")
               except Exception as e:
                 logger.debug(f"Clear failed: {e}")
 
@@ -1085,25 +999,9 @@ class Command:
     fwd_kp, fwd_kd = 0.50, 0.10  # m/s per unit distance error
     vrt_kp, vrt_kd = 0.40, 0.10  # m/s per unit vertical error
 
-    k_lin_p, k_lin_d = 0.60, 0.12 # IBVS pixel -> body velocity gains (click-to-go)
-
     # Clamps and headbands
     yaw_max, vx_max, vz_max = 180.0, 0.30, 0.25
     db_px, db_dist = 0.02, 0.02
-
-    vx_max = helpers._to_float(os.getenv("CLICK2GO_MAX_SPEED"), default=vx_max) or vx_max
-    loss_N = helpers._to_int(os.getenv("CLICK2GO_TAG_LOSS_FRAMES"), default=10) or 10
-    err_alpha = helpers._to_float(os.getenv("CLICK2GO_ERR_LPF"), default=0.35) or 0.35
-    vel_slew = helpers._to_float(os.getenv("CLICK2GO_VEL_SLEW"), default=0.8) or 0.8  # m/s^2
-
-    # state for filters/derivatives
-    ex_f = 0.0
-    ey_f = 0.0
-    vx_cmd = 0.0
-    vy_cmd = 0.0
-    last_valid_t = None
-    lost_frames = 0
-    seen_frames = 0
 
     # derivative memory
     ex_prev = ed_prev = ey_prev = None
@@ -1111,57 +1009,25 @@ class Command:
     while not stop_event.is_set():
       t0 = time.time()
 
-      # gate: only do something while G/S flight modes are active
+      # gate: only do someting while G/S flight modes are active
       if (start_event is None or not start_event.is_set()) or not (self.manual_active or self.swarm_active):
-        # keep motors alive with a neutral hover setpoint
-        vx_cmd = 0.0
-        vy_cmd = 0.0
-        last_valid_t = None
-        ex_prev = ed_prev = ey_prev = None
+        # stay idle; do not hover or land here
+        logger.debug(f"IBVS idle: event={start_event.is_set() if start_event else None}, "
+                     f"manual={self.manual_active}, swarm={self.swarm_active}")
         time.sleep(dt)
         continue
 
       frame, res = detector.latest()
-      # Drive pause/resume from vision.py's overlay output
-      trackable = False
-      if res:
-        trackable = bool(res.get("click_trackable", False))
-
-      if not res or not trackable:
-        lost_frames += 1
-        # Enter/maintain HOLD without clearing the click target
-
-        if not self._hold_active and self._ibvs_ref_px is not None:
-          self._hold_active = True
-          self._hold_since = time.time()
-          logger.info("IBVS click-to-go: paused (clicked marker not trackable)")
-
-        # Neutral hover (vx=vy=vz=yaw=0). NOTE: vz is velocity; keep it 0.0.
-        self._send_body_motion(0.0, 0.0, 0.0, 0.0, dt)
+      if frame is None or not res:
         time.sleep(dt)
         continue
-      else:
-        # Resume if we were holding
-        if self._hold_active:
-          self._hold_active = False
-          logger.info("IBVS click-to-go: resumed (clicked marker trackable)")
-        lost_frames = 0
 
-      # Prefer the marker center provided by vision.py for stability
-      cm = res.get("click_marker_center")
-      if cm is not None:
-        cx, cy = float(cm[0]), float(cm[1])
-        H, W = frame.shape[:2]
-        area = float(res.get("click_marker_area_px") or 1.0)
-        tgt = (cx, cy, area, float(W), float(H))
-      else:
-        # Fallback to your existing primary_target() if vision didn't attach center
-        tgt = vision.primary_target(res, frame.shape)
-
-        if not tgt:
-          self._send_body_motion(0.0, 0.0, 0.0, 0.0, dt)
-          time.sleep(dt)
-          continue
+      tgt = vision.primary_target(res, frame.shape)
+      if not tgt:
+        # no target? then do nothing (PyGame continues to command)
+        logger.debug("IBVS: no target detected this frame")
+        time.sleep(dt)
+        continue
 
       cx, cy, area, W, H = tgt
       logger.debug(f"IBVS target: cx={cx:.1f}, cy={cy:.1f}, area={area:.0f}")
@@ -1169,75 +1035,28 @@ class Command:
       if halfW is None: halfW, halfH = W / 2.0, H / 2.0
 
       # normalized errors
-      rx, ry = (self._ibvs_ref_px if self._ibvs_ref_px else (halfW, halfH))
-      ex = (cx - rx) / halfW          # horizontal pixel error → yaw/forward via your IBVS
-      ey = (cy - ry) / halfH          # vertical pixel error (often ignored if you hold Z)
-
-      ed = 0.0
-      if self._ibvs_ref_area is not None:
-        ed = (self._ibvs_ref_area - max(area, 1.0)) / max(self._ibvs_ref_area, 1.0)
+      ex = (cx - halfW) / halfW          # [-1,1], horizontal pixel error → yaw
+      ey = (cy - halfH) / halfH          # vertical pixel error → vz (optional)
+      ed = (desired_area_px - max(area, 1.0)) / max(desired_area_px, 1.0)
 
       # deadbands
       if abs(ex) < db_px: ex = 0.0
       if abs(ey) < db_px: ey = 0.0
       if abs(ed) < db_dist: ed = 0.0
 
-      # low-pass error and compute derivatives with actual time since last detection
-      ex_f = (1.0 - err_alpha) * ex_f + err_alpha * ex
-      ey_f = (1.0 - err_alpha) * ey_f + err_alpha * ey
-      now = time.time()
+      # finite diffs (derivative)
+      ex_d = 0.0 if ex_prev is None else (ex - ex_prev) / dt
+      ed_d = 0.0 if ed_prev is None else (ed - ed_prev) / dt
+      ey_d = 0.0 if ey_prev is None else (ey - ey_prev) / dt
+      ex_prev, ed_prev, ey_prev = ex, ed, ey
 
-      if last_valid_t is None:
-        dt_valid = dt
-      else:
-        dt_valid = max(1e-3, now - last_valid_t)
+      # PD to commands + clamp
+      yaw_rate = max(-yaw_max, min(yaw_max, (yaw_kp  *ex) + (yaw_kd * ex_d))) # deg/s
+      vx = max(-vx_max, min(vx_max, (fwd_kp * ed) + (fwd_kd * ed_d)))         # m/s
+      vz = 0.0 if not use_vertical else max(-vz_max, min(vz_max, (vrt_kp * ey) + (vrt_kd * ey_d)))
 
-      ex_d = 0.0 if ex_prev is None else (ex_f - ex_prev) / dt_valid
-      ed_d = 0.0 if ed_prev is None else (ed - ed_prev) / dt_valid
-      ey_d = 0.0 if ey_prev is None else (ey_f - ey_prev) / dt_valid
-      last_valid_t = now
-      ex_prev, ed_prev, ey_prev = ex_f, ed, ey_f
-
-      # If no active click target, hold station (keep sending zeros to preserve cadence)
-      if self._ibvs_ref_px is None:
-        self._send_body_motion(0.0, 0.0, 0.0, 0.0, dt)
-        elapsed = time.time() - t0
-        if elapsed < dt:
-          time.sleep(dt - elapsed)
-        continue
-
-      # Click-to-go mapping: keep yaw fixed; drive with lateral body velocities
-      yaw_rate = 0.0
-
-      # Pixel up/down (−ey_f) -> forward/back; pixel left/right (−ex_f) -> strafe
-      vx_des = self._sat(k_lin_p * (-ey_f) + k_lin_d * (-(ey_d)), -vx_max, vx_max)
-      vy_des = self._sat(k_lin_p * (-ex_f) + k_lin_d * (-(ex_d)), -vx_max, vx_max)
-
-      # slew-limit toward desired velocity to prevent thrust puffs
-      max_step = vel_slew * dt_valid
-      vx_cmd = vx_cmd + self._sat(vx_des - vx_cmd, -max_step, +max_step)
-      vy_cmd = vy_cmd + self._sat(vy_des - vy_cmd, -max_step, +max_step)
-      vx_b = vx_cmd
-      vy_b = vy_cmd
-      vz = 0.0 if not use_vertical else self._sat((vrt_kp * ey_f) + (vrt_kd * ey_d), -vz_max, vz_max)
-      logger.debug(f"IBVS cmd: vx={vx_b:.2f} vy={vy_b:.2f} tol={self.click2go_tol_px}px ex={ex:.3f} ey={ey:.3f}")
-
-      # Stop when the pixel is inside tolerance of the clicked target
-      if self._ibvs_ref_px is not None:
-        if abs(cx - rx) < self.click2go_tol_px and abs(cy - ry) < self.click2go_tol_px:
-          # Neutral hover instead of STOP to prevent thrust drop
-          self._send_body_motion(0.0, 0.0, 0.0, 0.0, dt)
-          self._ibvs_ref_px = None
-          self._ibvs_ref_area = None
-          self._hold_active = False
-          logger.info("IBVS click-to-go: reached target; hovering.")
-          time.sleep(0.1)
-          continue
-
-      logger.debug("Sending body motion: " \
-                  f"[vx_b={vx_b:.2f} | vy_b={vy_b:.2f} | vz={vz:.2f} | "
-                  f"yaw_rate={yaw_rate:.2f} | dt={dt_valid:.3f}]")
-      self._send_body_motion(vx_b, vy_b, vz, yaw_rate, dt)
+      # send setpoint (vy=0 for simplicity)
+      self.mc.start_linear_motion(vx, 0.0, vz, rate_yaw=yaw_rate)
 
       # pacing
       elapsed = time.time() - t0
@@ -1289,7 +1108,7 @@ class Command:
         ok_est = True
 
       if not ok_est:
-        self._stop_body_motion()
+        self.mc.stop()
         time.sleep(dt)
         continue
 
@@ -1365,7 +1184,7 @@ class Command:
       vy_b = self._sat(vy_b, -max_vxy, max_vxy)
 
       # send it
-      self._send_body_motion(vx_b, vy_b, vz, rate_yaw, dt)
+      self.mc.start_linear_motion(vx_b, vy_b, vz, rate_yaw=rate_yaw)
 
       # pacing
       elapsed = time.time() - t0

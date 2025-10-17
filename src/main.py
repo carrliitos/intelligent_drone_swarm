@@ -150,15 +150,20 @@ def run(connection_type, use_vision=False, use_control=False, swarm_uris=None):
         ctrl_stop = threading.Event()
         def _ctrl_loop():
           try:
-            command.follow_target_ibvs(
+            command.follow_target_servo(
               detector=detector,
               stop_event=ctrl_stop,
               start_event=command.ibvs_enable_event,
-              loop_hz=int(os.getenv("CLICK2GO_RATE_HZ", "20")),
-              use_vertical=False
+              loop_hz=50,
+              gains=dict(Kpx=0.6, Kdx=0.2,
+                         Kpy=0.6, Kdy=0.2,
+                         Kpz=1.0, Kiz=0.2,
+                         Kpyaw=2.0, Kdyaw=0.3),
+              vision_yaw_alpha=0.05,
+              forward_nudge_alpha=0.03
             )
           except Exception as e:
-            logger.error(f"IBVS loop error: {e}")
+            logger.error(f"Servo error: {e}")
         ctrl_thread = threading.Thread(target=_ctrl_loop, daemon=True)
         ctrl_thread.start()
 
@@ -249,18 +254,17 @@ def cli():
     swarm_uris = [RADIO_CHANNELS[c] for c in channels]
     first = channels[0]
     connection_type = RADIO_CHANNELS[first]
-    use_vision = ("vision" in extras) or ("ibvs_click" in extras)
-    use_control = (("control" in extras) or ("ibvs_click" in extras)) and use_vision
-    waypoint_flag = "waypint" in extras
-    logger.info(f"Swarm URIs: {swarm_uris} | vision={use_vision} control={use_control} waypoint={waypoint_flag}")
+    use_vision = "vision" in extras
+    use_control = "control" in extras and use_vision
+    logger.info(f"Swarm URIs: {swarm_uris} | vision={use_vision} control={use_control}")
     run(connection_type, use_vision=use_vision, use_control=use_control, swarm_uris=swarm_uris)
     sys.exit(0)
   else:
     logger.error(f"Invalid connection type: {args[0]}")
     print_usage()
 
-  use_vision = ("vision" in extras) or ("ibvs_click" in extras)
-  use_control = ("control" in extras) or ("ibvs_click" in extras)
+  use_vision = "vision" in extras
+  use_control = "control" in extras
   waypoint_flag = "waypoint" in extras
 
   if use_control and not use_vision:
@@ -273,7 +277,7 @@ def cli():
   else:
     os.environ["WAYPOINT_LOGGING"] = WAYPOINT_ENV_DEFAULT
 
-  logger.info(f"Using connection: {connection_type}  | vision={use_vision} control={use_control} waypoint={waypoint_flag}")
+  logger.info(f"Using connection: {connection_type}  | vision={use_vision} control={use_control}")
   run(connection_type, use_vision=use_vision, use_control=use_control)
 
 if __name__ == '__main__':
