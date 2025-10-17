@@ -18,7 +18,8 @@ dependencies = [
   "scipy",
   "watchdog",
   "pandas",
-  "pygame"
+  "pygame",
+  "notebook==7.4.7"
 ]
 description = "UW-Whitewater MSCS Capstone: Drone Swarm Coordination System"
 readme = "README.md"
