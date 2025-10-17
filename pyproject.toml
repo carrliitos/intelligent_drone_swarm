@@ -19,7 +19,7 @@ dependencies = [
   "watchdog",
   "pandas",
   "pygame",
-  "setuptools>=68,<81"
+  "setuptools>=68,<81",
   "notebook==7.4.7"
 ]
 description = "UW-Whitewater MSCS Capstone: Drone Swarm Coordination System"
