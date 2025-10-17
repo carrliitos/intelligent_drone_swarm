@@ -436,6 +436,7 @@ class DetectorRT:
     idx, mid, cx, cy = chosen
     dx_px = int(round(click_x - cx))
     dy_px = int(round(click_y - cy))
+    dist_px = int(round(np.hypot(dx_px, dy_px)))
 
     # Draw visuals
     cv2.drawMarker(frame, (click_x, click_y), (255, 255, 255), cv2.MARKER_TILTED_CROSS, 14, 2)
@@ -443,7 +444,7 @@ class DetectorRT:
     cv2.line(frame, (int(round(cx)), int(round(cy))), (click_x, click_y), (255, 255, 255), 1, cv2.LINE_AA)
 
     # Build label
-    label = f"ID {mid}  dpx=({dx_px:d},{dy_px:d})"
+    label = f"ID {mid}  dpx=({dx_px:d},{dy_px:d})  dpix={dist_px:d}px"
     metric_txt = ""
     if self._metric_enabled and self._do_pose and rvecs is not None and tvecs is not None:
       try:
@@ -462,7 +463,7 @@ class DetectorRT:
 
         # Ray from camera origin through pixel
         uv = np.array([[[float(click_x), float(click_y)]]], dtype=np.float32)
-        undist = cv2.undistortPoints(uv, K, D, P=K)
+        undist = cv2.undistortPoints(uv, K, D)
         xn = undist[0,0,0]
         yn = undist[0,0,1]
         ray_dir = np.array([[xn],[yn],[1.0]], dtype=np.float64)
@@ -479,15 +480,26 @@ class DetectorRT:
           Xm = R.T @ (Pc - tvec)
           dX = float(Xm[0,0])
           dY = float(Xm[1,0])
-          metric_txt = f"  dM=({dX:.3f}m,{dY:.3f}m)"
+          dR = float(np.hypot(dX, dY))
+          metric_txt = f"  dM=({dX:.3f}m,{dY:.3f}m)  |  ||dM||={dR:.3f}m"
         else:
           metric_txt = "  dM=(n/a)"
       except Exception as e:
         metric_txt = "  dM=(n/a)"
         _logfmt("metric_delta_error", level=logging.DEBUG, err=str(e))
 
-    cv2.putText(frame, label + metric_txt, (click_x + 8, click_y - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255,255,255), 2, cv2.LINE_AA)
-    _logfmt("click_delta", id=int(mid), x=click_x, y=click_y, cx=f"{cx:.1f}", cy=f"{cy:.1f}", dx_px=dx_px, dy_px=dy_px, metric=metric_txt.strip())
+    cv2.putText(frame, 
+                label + metric_txt, 
+                (click_x + 8, click_y - 8), 
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.55, (255,255,255), 2, 
+                cv2.LINE_AA)
+    _logfmt("click_delta", 
+            id=int(mid), x=click_x, y=click_y, 
+            cx=f"{cx:.1f}", cy=f"{cy:.1f}", 
+            dx_px=dx_px, dy_px=dy_px, 
+            dpix=dist_px, 
+            metric=metric_txt.strip())
 
   def open(self):
     """
