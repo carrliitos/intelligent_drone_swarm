@@ -3,6 +3,8 @@ import time
 import sys
 import logging
 from typing import Optional, Tuple, Dict, Any, List, Union
+from datetime import datetime, timezone
+from threading import RLock
 from dotenv import load_dotenv
 load_dotenv(dotenv_path="config/.env")
 
@@ -239,6 +241,19 @@ class DetectorRT:
     }
     self._ema_alpha = 0.2  # EMA smoothing for FPS
 
+    # Recording state
+    self._rec_lock: RLock = RLock()
+    self._rec_on: bool = False
+    self._rec_writer: Optional[cv2.VideoWriter] = None
+    self._rec_path: Optional[Path] = None
+    self._rec_size: Optional[Tuple[int, int]] = None  # (W, H)
+    self._rec_fps: float = 30.0
+    self._rec_fourcc_str: str = (os.getenv("RECORD_FOURCC") or "mp4v").strip()
+    self._rec_started_ts: float = 0.0
+    self.fps_ema: Optional[float] = None
+    self._captures_dir: Path = Path(f"{directory}/data/captures")
+    self._captures_dir.mkdir(parents=True, exist_ok=True)
+
     # Init echo
     _logfmt(
       "detector_init",
@@ -253,6 +268,56 @@ class DetectorRT:
       min_brightness=self.min_brightness,
       do_pose=self._do_pose, marker_len_m=self.marker_length_m
     )
+
+  def _utc_stamp(self) -> str:
+    return datetime.now(timezone.utc).strftime("%YMM%d_%H%M%S").replace("MM", "%m")
+
+  def _resolve_path(self) -> Path:
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    return (self._captures_dir / f"capture-{ts}.mp4").resolve()
+
+  def _open_writer(self, size: Tuple[int, int]) -> bool:
+    """(Re)open writer for given (W,H). Caller holds _rec_lock."""
+    try:
+      if self._rec_writer is not None:
+        try:
+          self._rec_writer.release()
+        except Exception:
+          pass
+        self._rec_writer = None
+
+      fourcc = cv2.VideoWriter_fourcc(*self._rec_fourcc_str)
+      writer = cv2.VideoWriter(str(self._rec_path),
+                               fourcc,
+                               float(self._rec_fps),
+                               (int(size[0]), int(size[1])),
+                               True)
+      if not writer or not writer.isOpened():
+        logger.warning(f"Failed to open VideoWriter path={self._rec_path} fourcc={self._rec_fourcc_str} fps={self._rec_fps} size={size}")
+        return False
+
+      self._rec_writer = writer
+      self._rec_size = (int(size[0]), int(size[1]))
+
+      return True
+    except Exception as e:
+      logger.warning(f"Exception opening writer: {e}")
+      return False
+
+  def _draw_rec_hud(self, frame: np.ndarray) -> None:
+    """Draw 'REC | mm:ss' in the upper-left. Mutates frame in place."""
+    try:
+      elapsed = max(0, int(time.time() - self._rec_started_ts))
+      mm = elapsed // 60
+      ss = elapsed % 60
+      text = f"REC | {mm:02d}:{ss:02d}"
+      org = (12, 24)
+      # red dot
+      cv2.circle(frame, (8, 16), 6, (0, 0, 255), -1, cv2.LINE_AA)
+      # text
+      cv2.putText(frame, text, org, cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2, cv2.LINE_AA)
+    except Exception:
+      pass
 
   def _point_to_cell(self, x: float, y: float, w: int, h: int):
     """
@@ -311,6 +376,114 @@ class DetectorRT:
       size = min(w, h) // 20
       cv2.line(frame, (cx - size, cy), (cx + size, cy), self.grid_color, self.grid_thickness + 1, cv2.LINE_AA)
       cv2.line(frame, (cx, cy - size), (cx, cy + size), self.grid_color, self.grid_thickness + 1, cv2.LINE_AA)
+
+  def start_record(self, 
+                   path: Optional[Union[str, Path]] = None,
+                   fourcc: Optional[str] = None,
+                   fps: Optional[float] = None) -> bool:
+    """
+    Arm the recorder. The writer will lazily open on the first frame (so we can lock to actual size).
+    Returns True if armed; writer might still be None until first frame arrives.
+    """
+    with self._rec_lock:
+      if self._rec_on:
+        return True
+
+      self._captures_dir.mkdir(parents=True, exist_ok=True)
+      self._rec_path = Path(path) if path else self._resolve_path()
+      self._rec_fourcc_str = (fourcc or self._rec_fourcc_str or "mp4v").strip()
+      # FPS selection: explicit > EMA > 30.0 fallback
+
+      if fps and fps > 0:
+        self._rec_fps = float(fps)
+      elif (self.fps_ema or 0) > 0:
+        self._rec_fps = float(self.fps_ema)
+      else:
+        self._rec_fps = 30.0
+
+      self._rec_writer = None
+      self._rec_size = None
+      self._rec_started_ts = time.time()
+      self._rec_on = True
+
+      logger.info(f"START recording -> {self._rec_path.name} fourcc={self._rec_fourcc_str} fps={self._rec_fps:.1f}")
+      return True
+
+  def stop_record(self) -> None:
+    """Stop and finalize recording, releasing resources."""
+    with self._rec_lock:
+      if not self._rec_on and self._rec_writer is None:
+        return
+
+      try:
+        if self._rec_writer is not None:
+          self._rec_writer.release()
+      except Exception:
+        pass
+      finally:
+        self._rec_writer = None
+        self._rec_on = False
+        self._rec_size = None
+        logger.info("STOP recording")
+
+  def toggle_record(self) -> bool:
+    """Toggle ON/OFF. Returns new state (True=ON)."""
+    with self._rec_lock:
+      if self._rec_on:
+        self.stop_record()
+        return False
+      else:
+        self.start_record()
+        return True
+
+  def write_if_recording(self, frame: np.ndarray, fps_hint: Optional[float] = None) -> None:
+    """
+    Thread-safe: overlays REC HUD and writes annotated BGR frame if recording is active.
+    Lazily (re)opens the writer to match current frame size. Safe on failures.
+    """
+    if frame is None:
+      return
+
+    with self._rec_lock:
+      if not self._rec_on:
+        return
+
+      # HUD
+      self._draw_rec_hud(frame)
+      H, W = int(frame.shape[0]), int(frame.shape[1])
+      size = (W, H)
+
+      # (Re)open writer if needed or size changed
+      need_open = (self._rec_writer is None) or (self._rec_size is None) or (self._rec_size != size)
+
+      if need_open:
+        # If this is the first frame and fps was unknown earlier, adopt hint now.
+        if (self.fps_ema or 0) <= 0 and (fps_hint or 0) > 0:
+          self._rec_fps = float(fps_hint)
+
+        if not self._open_writer(size):
+          # degrade gracefully: disable recording
+          self._rec_on = False
+          self._rec_writer = None
+          self._rec_size = None
+          logger.warning("Disabled recording due to writer open failure.")
+          return
+        else:
+          logger.info(f"Writer (re)opened at size={size} fps={self._rec_fps:.1f}")
+
+      # Write frame
+      try:
+        self._rec_writer.write(frame)
+      except Exception as e:
+        logger.warning(f"Write failed, disabling. err={e}")
+        try:
+          self._rec_writer.release()
+        except Exception:
+          pass
+
+        self._rec_writer = None
+        self._rec_on = False
+        self._rec_size = None
 
   def latest_pose(self):
     """
@@ -644,6 +817,13 @@ class DetectorRT:
         self.cap.set(cv2.CAP_PROP_AUTO_WB, 1)
         self.cap.release()
       self.cap = None
+
+    # Finalize any active recording before closing windows
+    try:
+      self.stop_record()
+    except Exception:
+      pass
+
     cv2.destroyAllWindows()
     DetectorRT._is_open = False
 
@@ -826,9 +1006,18 @@ class DetectorRT:
     self._overlay_click_delta(frame, results)
     self._mark_occupied(frame) # Highlight the occupied cells and then draw grid
 
+    try:
+      fps_hint = (self.stats.get("ema_fps", 0.0) or self._fps_display or 30.0)
+      self.write_if_recording(frame, fps_hint=fps_hint)
+    except Exception:
+      pass
+
     # Update public + cached results (pose snapshot included above if available)
     self.last_results = results
     self._last_results = results
+
+    # If recording is armed, write this annotated frame
+    self.write_if_recording(frame, fps_hint=self._fps_display)
 
     with self._latest_lock:
       self._latest_frame = frame.copy()   # small cost; safe for readers

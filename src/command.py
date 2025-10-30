@@ -135,6 +135,7 @@ class Command:
     self._vision_click = None
     self._vision_toggle = None
     self._vision_clear = None
+    self._p_was_down = False
 
     # Waypoints config (env/CLI)
     self.wp_enabled = helpers._b(os.getenv("WAYPOINT_LOGGING"), default=True)
@@ -165,6 +166,13 @@ class Command:
     self._waypoints: list[Waypoint] = []
     self._wp_lock = threading.Lock()
     self._latest_frame_idx = 0
+
+  @property
+  def detector(self):
+    """
+    Clunky AF but back-compat shim: allow code to use `self.detector` safely.
+    """
+    return self._get_detector()
 
   @staticmethod
   def _sat(x, lo, hi):
@@ -931,6 +939,21 @@ class Command:
 
         keys = pygame.key.get_pressed()
         mods = pygame.key.get_mods()
+        p_down = keys[pygame.K_p]
+
+        if p_down and not self._p_was_down:
+          try:
+            if self.detector is not None:
+              state = self.detector.toggle_record()
+              if state:
+                logger.info("Recording: ON (press P to stop)")
+              else:
+                logger.info("Recording: OFF")
+            else:
+              logger.warning("Recording toggle ignored: detector not initialized.")
+          except Exception as e:
+            logger.warning(f"Recording toggle failed: {e}")
+        self._p_was_down = p_down
 
         # Single-drone MANUAL (G to enter, L to land/exit)
         g_down = keys[pygame.K_g]
@@ -1115,6 +1138,7 @@ class Command:
           "R / F       | Altitude up / down",
           "V           | Toggle click-delta overlay (vision)",
           "C           | Clear click-delta point (vision)",
+          "P           | Start/Stop video recording (vision)",
           "Backspace   | Exit program"
         ]
 
