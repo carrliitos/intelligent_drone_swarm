@@ -10,6 +10,8 @@ data/*.json
 !data/.gitkeep
 data/figs/*.png
 !data/figs/.gitkeep
+data/captures/*.mp4
+!data/captures/.gitkeep
 src/utils/calibration_imgs/*
 !src/utils/calibration_imgs/.gitkeep
 !src/utils/calibration_imgs/ChArUco_Marker.png
