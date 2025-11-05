@@ -911,8 +911,28 @@ class Command:
           if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_BACKSPACE:
               done = True
+
             if event.key == pygame.K_h:
               self._hover()
+
+            if event.key == pygame.K_1 and self.swarm:
+              try:
+                self.swarm.form_line()
+              except Exception as e:
+                logger.warning(f"Swarm formation call failed (line): {e}")
+
+            if event.key == pygame.K_2 and self.swarm:
+              try:
+                self.swarm.form_triangle()
+              except Exception as e:
+                logger.warning(f"Swarm formation call failed (triangle): {e}")
+
+            if event.key == pygame.K_3 and self.swarm:
+              try:
+                self.swarm.form_square()
+              except Exception as e:
+                logger.warning(f"Swarm formation call failed (square): {e}")
+
             # Vision overlay hotkeys
             if event.key == pygame.K_v:
               try:
