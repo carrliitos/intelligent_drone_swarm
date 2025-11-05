@@ -12,12 +12,12 @@ from cflib.crazyflie.log import LogConfig
 from cflib.crazyflie.syncLogger import SyncLogger
 from cflib.positioning.motion_commander import MotionCommander
 
-from utils import logger, context
+from utils import logger as _log, context
 
 directory = context.get_context(os.path.abspath(__file__))
 logger_file_name = Path(directory).stem
 logger_name = Path(__file__).stem
-logger = logger.setup_logger(
+logger = _log.setup_logger(
   logger_name=logger_name, 
   log_file=f"{directory}/logs/{logger_file_name}.log", 
   log_level=os.getenv("LOG_LEVEL")
@@ -220,3 +220,18 @@ class SwarmCommand:
 
     if not moved:
       self._stop_all()
+
+  def form_line(self):
+    """Arrange drones in a straight line formation."""
+    logger.info("Swarm formation: line (stub)")
+    return None
+
+  def form_triangle(self):
+    """Arrange drones in a triangle formation."""
+    logger.info("Swarm formation: triangle (stub)")
+    return None
+
+  def form_square(self):
+    """Arrange drones in a square formation."""
+    logger.info("Swarm formation: square (stub)")
+    return None
