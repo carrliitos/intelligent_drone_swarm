@@ -29,6 +29,14 @@ autonomously to external stimuli (e.g., following a moving target or converging 
 - **Proof-of-Concept Demonstration**: Validate a centralized architecture where the external CV system issues commands to 
 multiple Crazyflies, showcasing potential use cases in autonomous coordination.
 
+## Swarm Formations
+
+Press `1`, `2`, or `3` (during swarm mode) to trigger preset formations:
+
+- **`1`**: Line formation (horizontal)
+- **`2`**: Triangle formation (equilateral rows)
+- **`3`**: Square formation (grid layout)
+
 ## Getting Started
 
 ### 1. Clone the Repository

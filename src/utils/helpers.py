@@ -103,3 +103,30 @@ def _filter_known(corners, ids, allowed: Optional[set]):
     return [], None
   ids_out = np.array(keep_ids, dtype=np.int32).reshape(-1, 1)
   return keep_corners, ids_out
+
+def _clamp(val: float, lo: float, hi: float) -> float:
+  """Clamp val to [lo, hi]."""
+  return max(lo, min(hi, val))
+
+def _f_clamped(val, default: float, lo: float, hi: float) -> float:
+  """Parse float, use default if None/invalid, then clamp."""
+  parsed = _f(val, default=default)
+  return _clamp(parsed, lo, hi)
+
+def _b(val, default: bool = False) -> bool:
+  """Parse boolean from env string or bool."""
+  if val is None:
+    return default
+
+  if isinstance(val, bool):
+    return val
+
+  s = str(val).strip().lower()
+
+  if s in ("1", "true", "yes", "on"):
+    return True
+
+  if s in ("0", "false", "no", "off"):
+    return False
+
+  return default
