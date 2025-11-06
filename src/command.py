@@ -712,6 +712,7 @@ class Command:
     Interactive PyGame controller for drone thrust and orientation.
     """
     done = False
+    clock = pygame.time.Clock()
 
     logger.info("In pygame function")
     pygame.init()
@@ -1255,6 +1256,8 @@ class Command:
               break
 
           pygame.display.flip()
+
+        clock.tick(60)
     finally:
       logger.info("Stopping logging and closing connection to drone.")
       self.drone_logger.stop_logging()
