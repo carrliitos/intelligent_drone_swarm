@@ -424,7 +424,10 @@ class SwarmCommand:
     logger.info("Executing SQUARE formation...")
     self._execute_formation("square")
 
-  def form_oscillate(self, distance_m: float = 0.25, sets: int = 5, pause_s: float = 1.0):
+  def form_oscillate(self, 
+                     distance_m: float = 0.25, 
+                     sets: int = 5, 
+                     pause_s: float = 1.0):
     """
     Simple "formation" where every drone moves:
 
