@@ -130,7 +130,7 @@ class SwarmCommand:
        a. Ensure at formation altitude
        b. Move to offset position
        c. Dwell
-       d. (Optional) Return to origin
+       d. Return to origin
     """
     if self.swarm is None:
       logger.error("Swarm not open; cannot execute formation.")
@@ -358,6 +358,8 @@ class SwarmCommand:
       self.mcs.clear()
 
   def enter_manual(self):
+    logger.info("Taking off...")
+    time.sleep(1.0)
     # Takeoff all
     for mc in self.mcs.values():
       try:
@@ -367,6 +369,8 @@ class SwarmCommand:
         pass
 
   def land(self):
+    logger.info("Landing...")
+    time.sleep(1.0)
     for mc in self.mcs.values():
       try: mc.land()
       except: pass
