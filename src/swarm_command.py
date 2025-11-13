@@ -1,7 +1,9 @@
 import time
 import os 
+import math
+import sys
 from pathlib import Path
-from typing import Iterable, Dict
+from typing import Iterable, Dict, List, Tuple
 from dotenv import load_dotenv
 load_dotenv(dotenv_path="config/.env") 
 import contextlib
@@ -12,12 +14,12 @@ from cflib.crazyflie.log import LogConfig
 from cflib.crazyflie.syncLogger import SyncLogger
 from cflib.positioning.motion_commander import MotionCommander
 
-from utils import logger, context
+from utils import logger as _log, context, helpers
 
 directory = context.get_context(os.path.abspath(__file__))
 logger_file_name = Path(directory).stem
 logger_name = Path(__file__).stem
-logger = logger.setup_logger(
+logger = _log.setup_logger(
   logger_name=logger_name, 
   log_file=f"{directory}/logs/{logger_file_name}.log", 
   log_level=os.getenv("LOG_LEVEL")
@@ -41,6 +43,188 @@ class SwarmCommand:
     self.speed_xy = 0.50
     self.speed_z  = 1.00
     self.yaw_rate = 90.0
+
+    # Formation parameters
+    self.form_spacing_m = helpers._f_clamped(os.getenv("FORM_SPACING_M"), default=0.40, lo=0.25, hi=2.0)
+    self.form_alt_m = helpers._f_clamped(os.getenv("FORM_ALT_M"), default=0.30, lo=0.15, hi=1.5)
+    self.form_vel_mps = helpers._f_clamped(os.getenv("FORM_VEL_MPS"), default=0.20, lo=0.05, hi=0.8)
+    self.form_dwell_s = helpers._f_clamped(os.getenv("FORM_DWELL_S"), default=3.0, lo=0.0, hi=10.0)
+    self.form_return_to_origin = helpers._b(os.getenv("FORM_RETURN_TO_ORIGIN"), default=False)
+    self.form_dry_run = helpers._b(os.getenv("FORM_DRY_RUN"), default=False)
+    self.form_timeout_s = helpers._f_clamped(os.getenv("FORM_TIMEOUT_S"), default=15.0, lo=5.0, hi=60.0)
+
+    logger.info(f"Formation config: spacing={self.form_spacing_m:.2f}m "
+                f"alt={self.form_alt_m:.2f}m vel={self.form_vel_mps:.2f}m/s "
+                f"dwell={self.form_dwell_s:.1f}s return={self.form_return_to_origin} "
+                f"dry_run={self.form_dry_run}")
+
+  def _ordered_uris(self) -> List[str]:
+    """Return a stable sorted list of URIs for deterministic formation layout."""
+    return sorted(self.uris)
+
+  @staticmethod
+  def _formation_offsets(shape: str, n: int, spacing: float) -> List[Tuple[float, float]]:
+    """
+    Generate (x, y) offsets for N drones in the specified formation shape.
+    All formations are centered around (0, 0).
+
+    - line: horizontal line centered at origin
+    - triangle: equilateral triangle rows (1, 2, 3, ...)
+    - square: grid ⌈√N⌉ × ⌈√N⌉ centered
+
+    Returns a list of (x, y) tuples, one per drone.
+    """
+    offsets = []
+
+    if shape == "line":
+      # Horizontal line: x = (i - (n-1)/2) * spacing, y = 0
+      for i in range(n):
+        x = (i - (n - 1) / 2.0) * spacing
+        y = 0.0
+        offsets.append((x, y))
+    elif shape == "triangle":
+      # Equilateral triangle: rows 1, 2, 3, ...
+      # Row spacing (vertical): spacing * sqrt(3)/2 for equilateral
+      row_spacing = spacing * math.sqrt(3) / 2.0
+      drone_idx = 0
+      row = 0
+
+      while drone_idx < n:
+        row_count = row + 1  # row 0 has 1 drone, row 1 has 2, etc.
+        for col in range(row_count):
+          if drone_idx >= n:
+            break
+          # Center each row horizontally
+          x = (col - (row_count - 1) / 2.0) * spacing
+          y = -row * row_spacing  # negative to grow downward
+          offsets.append((x, y))
+          drone_idx += 1
+        row += 1
+    elif shape == "square":
+      # Grid: ⌈√N⌉ × ⌈√N⌉
+      side = math.ceil(math.sqrt(n))
+      drone_idx = 0
+
+      for row in range(side):
+        for col in range(side):
+          if drone_idx >= n:
+            break
+          # Center the grid around (0, 0)
+          x = (col - (side - 1) / 2.0) * spacing
+          y = (row - (side - 1) / 2.0) * spacing
+          offsets.append((x, y))
+          drone_idx += 1
+    else:
+      logger.warning(f"Unknown formation shape '{shape}'; defaulting to line.")
+      return SwarmCommand._formation_offsets("line", n, spacing)
+
+    return offsets
+
+  def _execute_formation(self, shape: str):
+    """
+    Execute a formation maneuver for all drones in the swarm.
+
+    Steps:
+    1. Compute offsets for the given shape
+    2. For each drone (in parallel):
+       a. Ensure at formation altitude
+       b. Move to offset position
+       c. Dwell
+       d. Return to origin
+    """
+    if self.swarm is None:
+      logger.error("Swarm not open; cannot execute formation.")
+      return
+
+    ordered = self._ordered_uris()
+    n = len(ordered)
+    offsets = self._formation_offsets(shape, n, self.form_spacing_m)
+
+    logger.info(f"=== Formation '{shape}' START ===")
+    logger.info(f"Parameters: N={n}, spacing={self.form_spacing_m:.2f}m, "
+                f"alt={self.form_alt_m:.2f}m, vel={self.form_vel_mps:.2f}m/s, "
+                f"dwell={self.form_dwell_s:.1f}s, return={self.form_return_to_origin}, "
+                f"dry_run={self.form_dry_run}")
+    logger.info(f"Ordered URIs: {ordered}")
+    logger.info(f"Computed offsets (x, y): {offsets}")
+
+    if self.form_dry_run:
+      logger.info("[DRY-RUN] No actual movement will occur.")
+      for uri, (dx, dy) in zip(ordered, offsets):
+        logger.info(f"[DRY-RUN] {uri} -> offset=({dx:.3f}, {dy:.3f})")
+      logger.info("=== Formation DRY-RUN COMPLETE ===")
+      return
+
+    # Map URIs to offsets
+    uri_to_offset = dict(zip(ordered, offsets))
+
+    def _cf_formation_task(scf):
+      """Per-drone formation task."""
+      uri = scf.cf.link_uri
+      mc = self.mcs.get(uri)
+
+      if mc is None:
+        logger.warning(f"{uri}: No MotionCommander available; skipping.")
+        return
+
+      dx, dy = uri_to_offset.get(uri, (0.0, 0.0))
+      logger.info(f"{uri}: Starting formation task -> offset=({dx:.3f}, {dy:.3f})")
+
+      try:
+        # Move to offset position
+        distance = math.hypot(dx, dy)
+        if distance > 0.01:  # only move if offset is significant
+          duration = distance / self.form_vel_mps
+          # Cap duration to reasonable limits
+          duration = helpers._clamp(duration, 0.5, self.form_timeout_s)
+
+          # Compute velocity components
+          vx = (dx / distance) * self.form_vel_mps if distance > 0 else 0.0
+          vy = (dy / distance) * self.form_vel_mps if distance > 0 else 0.0
+
+          logger.info(f"{uri}: Moving to offset ({dx:.3f}, {dy:.3f}) "
+                      f"at v=({vx:.3f}, {vy:.3f}) for {duration:.2f}s")
+
+          mc.start_linear_motion(vx, vy, 0.0)
+          time.sleep(duration)
+          mc.stop()
+
+          logger.info(f"{uri}: Reached target offset.")
+        else:
+          logger.info(f"{uri}: Offset negligible; staying at origin.")
+
+        # Dwell
+        if self.form_dwell_s > 0:
+          logger.info(f"{uri}: Dwelling for {self.form_dwell_s:.1f}s")
+          time.sleep(self.form_dwell_s)
+
+        # Return to origin
+        if self.form_return_to_origin and distance > 0.01:
+          logger.info(f"{uri}: Returning to origin")
+          vx_ret = (-dx / distance) * self.form_vel_mps if distance > 0 else 0.0
+          vy_ret = (-dy / distance) * self.form_vel_mps if distance > 0 else 0.0
+
+          mc.start_linear_motion(vx_ret, vy_ret, 0.0)
+          time.sleep(duration)  # same duration for return
+          mc.stop()
+
+          logger.info(f"{uri}: Returned to origin.")
+
+        logger.info(f"{uri}: Formation task complete.")
+
+      except Exception as e:
+        logger.error(f"{uri}: Formation task failed: {e}", exc_info=True)
+        try:
+          mc.stop()
+        except:
+          pass
+
+    # Execute in parallel
+    try:
+      self.swarm.parallel_safe(_cf_formation_task)
+      logger.info("=== Formation COMPLETE ===")
+    except Exception as e:
+      logger.error(f"Formation execution failed: {e}", exc_info=True)
 
   @staticmethod
   def _wait_for_param_download(scf):
@@ -174,6 +358,8 @@ class SwarmCommand:
       self.mcs.clear()
 
   def enter_manual(self):
+    logger.info("Taking off...")
+    time.sleep(1.0)
     # Takeoff all
     for mc in self.mcs.values():
       try:
@@ -183,6 +369,8 @@ class SwarmCommand:
         pass
 
   def land(self):
+    logger.info("Landing...")
+    time.sleep(1.0)
     for mc in self.mcs.values():
       try: mc.land()
       except: pass
@@ -220,3 +408,18 @@ class SwarmCommand:
 
     if not moved:
       self._stop_all()
+
+  def form_line(self):
+    """Arrange drones in a straight line formation."""
+    logger.info("Executing LINE formation...")
+    self._execute_formation("line")
+
+  def form_triangle(self):
+    """Arrange drones in a triangle formation."""
+    logger.info("Executing TRIANGLE formation...")
+    self._execute_formation("triangle")
+
+  def form_square(self):
+    """Arrange drones in a square formation."""
+    logger.info("Executing SQUARE formation...")
+    self._execute_formation("square")

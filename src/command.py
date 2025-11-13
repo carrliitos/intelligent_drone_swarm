@@ -712,6 +712,7 @@ class Command:
     Interactive PyGame controller for drone thrust and orientation.
     """
     done = False
+    clock = pygame.time.Clock()
 
     logger.info("In pygame function")
     pygame.init()
@@ -911,8 +912,28 @@ class Command:
           if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_BACKSPACE:
               done = True
+
             if event.key == pygame.K_h:
               self._hover()
+
+            if event.key == pygame.K_1 and self.swarm:
+              try:
+                self.swarm.form_line()
+              except Exception as e:
+                logger.warning(f"Swarm formation call failed (line): {e}")
+
+            if event.key == pygame.K_2 and self.swarm:
+              try:
+                self.swarm.form_triangle()
+              except Exception as e:
+                logger.warning(f"Swarm formation call failed (triangle): {e}")
+
+            if event.key == pygame.K_3 and self.swarm:
+              try:
+                self.swarm.form_square()
+              except Exception as e:
+                logger.warning(f"Swarm formation call failed (square): {e}")
+
             # Vision overlay hotkeys
             if event.key == pygame.K_v:
               try:
@@ -1128,18 +1149,31 @@ class Command:
         instructions = [
           "Drone Control",
           "=======================================",
-          "H           | Autonomous Hover (one-shot, single)",
-          "G           | Single-Drone Manual (take off)",
-          "L           | Single-Drone Land / Exit Manual",
-          "S           | SWARM Manual (take off all)",
-          "K           | SWARM Land / Exit Manual",
-          "Arrow Keys  | Move (Forward, Back, Left, Right)",
-          "A / D       | Yaw left / right",
-          "R / F       | Altitude up / down",
-          "V           | Toggle click-delta overlay (vision)",
-          "C           | Clear click-delta point (vision)",
-          "P           | Start/Stop video recording (vision)",
-          "Backspace   | Exit program"
+          "Single-Drone Commands:",
+          "  H           | Autonomous Hover (one-shot)",
+          "  G           | Take Off (Manual Mode)",
+          "  L           | Land / Exit Manual",
+          "",
+          "Swarm Commands:",
+          "  S           | SWARM Take Off (All Drones)",
+          "  K           | SWARM Land / Exit",
+          "  1           | LINE Formation",
+          "  2           | TRIANGLE Formation",
+          "  3           | SQUARE Formation",
+          "",
+          "Movement (Manual/Swarm):",
+          "  Arrow Keys  | Forward, Back, Left, Right",
+          "  A / D       | Yaw Left / Right",
+          "  R / F       | Altitude Up / Down",
+          "",
+          "Vision (if enabled):",
+          "  Left Click  | Set Waypoint / Click-to-Go",
+          "  V           | Toggle Click-Delta Overlay",
+          "  C           | Clear Click Point",
+          "  P           | Start/Stop Video Recording",
+          "",
+          "Exit:",
+          "  Backspace   | Quit Program"
         ]
 
         # RENDER CONSOLE WINDOW
@@ -1235,6 +1269,8 @@ class Command:
               break
 
           pygame.display.flip()
+
+        clock.tick(60)
     finally:
       logger.info("Stopping logging and closing connection to drone.")
       self.drone_logger.stop_logging()
