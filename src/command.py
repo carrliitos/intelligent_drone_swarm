@@ -868,8 +868,8 @@ class Command:
       logger.info(f"Click: pygame=({mx},{my})  norm=({rx:.3f},{ry:.3f}) rect=({x0},{y0},{tw}x{th}) preview=({fw}x{fh})")
 
     try:
-      logger.info("Resetting estimators.")
-      self._reset_estimator()
+      # logger.info("Resetting estimators.")
+      # self._reset_estimator()
       time.sleep(1.0)
       self.drone_logger.start_logging()
       logger.info("GO!!!!")
@@ -933,6 +933,12 @@ class Command:
                 self.swarm.form_square()
               except Exception as e:
                 logger.warning(f"Swarm formation call failed (square): {e}")
+
+            if event.key == pygame.K_4 and self.swarm:
+              try:
+                self.swarm.form_oscillate()
+              except Exception as e:
+                logger.warning(f"Swarm formation call failed (oscillate): {e}")
 
             # Vision overlay hotkeys
             if event.key == pygame.K_v:
@@ -1160,6 +1166,7 @@ class Command:
           "  1           | LINE Formation",
           "  2           | TRIANGLE Formation",
           "  3           | SQUARE Formation",
+          "  4           | OSCILLATION Formation",
           "",
           "Movement (Manual/Swarm):",
           "  Arrow Keys  | Forward, Back, Left, Right",

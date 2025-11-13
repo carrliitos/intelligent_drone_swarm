@@ -423,3 +423,85 @@ class SwarmCommand:
     """Arrange drones in a square formation."""
     logger.info("Executing SQUARE formation...")
     self._execute_formation("square")
+
+  def form_oscillate(self, distance_m: float = 0.25, sets: int = 5, pause_s: float = 1.0):
+    """
+    Simple "formation" where every drone moves:
+
+      forward distance_m  -> pause
+      backward distance_m -> pause
+
+    That sequence is 1 set. We repeat for `sets` sets.
+
+    Movement is along the drone's X axis (same as forward/back).
+    """
+    if self.swarm is None:
+      logger.error("Swarm not open; cannot execute oscillation.")
+      return
+
+    # Sanity on sets
+    try:
+      sets = max(1, int(sets))
+    except Exception:
+      sets = 5
+
+    def _cf_oscillate_task(scf):
+      uri = scf.cf.link_uri
+      mc = self.mcs.get(uri)
+      if mc is None:
+        logger.warning(f"{uri}: No MotionCommander instance for oscillation.")
+        return
+
+      # Use formation velocity if available, otherwise manual XY speed
+      v = getattr(self, "form_vel_mps", None) or self.speed_xy
+      v = max(0.05, min(v, 0.8))  # keep it in a sane range
+
+      seg_t = distance_m / v  # time to move distance_m at speed v
+
+      logger.info(
+        f"{uri}: Starting oscillation d={distance_m:.2f}m v={v:.2f}m/s "
+        f"sets={sets} pause={pause_s:.2f}s"
+      )
+
+      try:
+        for i in range(sets):
+          # FORWARD
+          logger.info(f"{uri}: Oscillate set {i+1}/{sets} - forward")
+          mc.start_linear_motion(v, 0.0, 0.0)
+          time.sleep(seg_t)
+          mc.stop()
+
+          # PAUSE
+          if pause_s > 0:
+            logger.info(f"{uri}: Pause after forward ({pause_s:.2f}s)")
+            time.sleep(pause_s)
+
+          # BACKWARD
+          logger.info(f"{uri}: Oscillate set {i+1}/{sets} - backward")
+          mc.start_linear_motion(-v, 0.0, 0.0)
+          time.sleep(seg_t)
+          mc.stop()
+
+          # PAUSE
+          if pause_s > 0 and i < sets - 1:
+            logger.info(f"{uri}: Pause after backward ({pause_s:.2f}s)")
+            time.sleep(pause_s)
+
+      except Exception as e:
+        logger.error(f"{uri}: Oscillation task failed: {e}", exc_info=True)
+      finally:
+        try:
+          mc.stop()
+        except Exception:
+          pass
+
+      logger.info(f"{uri}: Oscillation task complete.")
+
+    try:
+      # Stop any prior motion first
+      self._stop_all()
+      logger.info("Executing OSCILLATE formation...")
+      self.swarm.parallel_safe(_cf_oscillate_task)
+      logger.info("=== Oscillate formation COMPLETE ===")
+    except Exception as e:
+      logger.error(f"Oscillate formation failed: {e}", exc_info=True)
