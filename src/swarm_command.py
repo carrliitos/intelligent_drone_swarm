@@ -425,7 +425,7 @@ class SwarmCommand:
     self._execute_formation("square")
 
   def form_oscillate(self, 
-                     distance_m: float = 0.25, 
+                     distance_m: float = 0.5, 
                      sets: int = 5, 
                      pause_s: float = 1.0):
     """
@@ -458,13 +458,10 @@ class SwarmCommand:
       # Use formation velocity if available, otherwise manual XY speed
       v = getattr(self, "form_vel_mps", None) or self.speed_xy
       v = max(0.05, min(v, 0.8))  # keep it in a sane range
-
       seg_t = distance_m / v  # time to move distance_m at speed v
 
-      logger.info(
-        f"{uri}: Starting oscillation d={distance_m:.2f}m v={v:.2f}m/s "
-        f"sets={sets} pause={pause_s:.2f}s"
-      )
+      logger.info(f"{uri}: Starting oscillation d={distance_m:.2f}m v={v:.2f}m/s "
+                  f"sets={sets} pause={pause_s:.2f}s")
 
       try:
         for i in range(sets):
@@ -508,3 +505,62 @@ class SwarmCommand:
       logger.info("=== Oscillate formation COMPLETE ===")
     except Exception as e:
       logger.error(f"Oscillate formation failed: {e}", exc_info=True)
+
+  def form_spin(self,
+                duration_s: float = 5.0,
+                angle_deg: float = 90.0,
+                rate_dps: float = 100.0):
+    """
+    Formation where each drone spins in place (yawing left) for ~duration_s.
+
+    Uses MotionCommander.turn_left(angle_deg, rate_dps) in a loop:
+      - angle_deg: degrees per command (default 90°)
+      - rate_dps: yaw rate in deg/s (default 100°/s)
+
+    We compute how many turns to fit roughly into `duration_s`.
+    """
+    if self.swarm is None:
+      logger.error("Swarm not open; cannot execute spin formation.")
+      return
+
+    # Clamp duration for safety
+    duration_s = max(0.5, min(duration_s, 30.0))
+
+    def _cf_spin_task(scf):
+      uri = scf.cf.link_uri
+      mc = self.mcs.get(uri)
+      if mc is None:
+        logger.warning(f"{uri}: No MotionCommander instance for spin.")
+        return
+
+      # Avoid divide-by-zero if someone passes a weird rate
+      rate = max(1.0, abs(rate_dps))
+      angle = float(angle_deg)
+      t_per_turn = abs(angle) / rate # Approx time for one turn command (sec)
+      n_turns = max(1, int(round(duration_s / t_per_turn))) # How many turns to approximate duration_s
+
+      logger.info(f"{uri}: Starting spin formation: duration={duration_s:.2f}s "
+                  f"angle={angle:.1f}° rate={rate:.1f}°/s ~{n_turns} turns")
+
+      try:
+        for i in range(n_turns):
+          logger.info(f"{uri}: Spin turn {i+1}/{n_turns}")
+          # Block until this turn is done
+          mc.turn_left(angle, rate)
+      except Exception as e:
+        logger.error(f"{uri}: Spin task failed: {e}", exc_info=True)
+      finally:
+        try:
+          mc.stop()
+        except Exception:
+          pass
+
+      logger.info(f"{uri}: Spin formation complete.")
+
+    try:
+      self._stop_all()
+      logger.info("Executing SPIN formation...")
+      self.swarm.parallel_safe(_cf_spin_task)
+      logger.info("=== Spin formation COMPLETE ===")
+    except Exception as e:
+      logger.error(f"Spin formation failed: {e}", exc_info=True)
