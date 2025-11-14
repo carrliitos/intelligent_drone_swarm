@@ -868,8 +868,8 @@ class Command:
       logger.info(f"Click: pygame=({mx},{my})  norm=({rx:.3f},{ry:.3f}) rect=({x0},{y0},{tw}x{th}) preview=({fw}x{fh})")
 
     try:
-      logger.info("Resetting estimators.")
-      self._reset_estimator()
+      # logger.info("Resetting estimators.")
+      # self._reset_estimator()
       time.sleep(1.0)
       self.drone_logger.start_logging()
       logger.info("GO!!!!")
@@ -933,6 +933,18 @@ class Command:
                 self.swarm.form_square()
               except Exception as e:
                 logger.warning(f"Swarm formation call failed (square): {e}")
+
+            if event.key == pygame.K_4 and self.swarm:
+              try:
+                self.swarm.form_oscillate()
+              except Exception as e:
+                logger.warning(f"Swarm formation call failed (oscillate): {e}")
+
+            if event.key == pygame.K_5 and self.swarm:
+              try:
+                self.swarm.form_spin()
+              except Exception as e:
+                logger.warning(f"Swarm formation call failed (spin): {e}")
 
             # Vision overlay hotkeys
             if event.key == pygame.K_v:
@@ -1153,25 +1165,23 @@ class Command:
           "  H           | Autonomous Hover (one-shot)",
           "  G           | Take Off (Manual Mode)",
           "  L           | Land / Exit Manual",
-          "",
           "Swarm Commands:",
           "  S           | SWARM Take Off (All Drones)",
           "  K           | SWARM Land / Exit",
           "  1           | LINE Formation",
           "  2           | TRIANGLE Formation",
           "  3           | SQUARE Formation",
-          "",
+          "  4           | OSCILLATION Formation",
+          "  5           | SPINNING Formation",
           "Movement (Manual/Swarm):",
           "  Arrow Keys  | Forward, Back, Left, Right",
           "  A / D       | Yaw Left / Right",
           "  R / F       | Altitude Up / Down",
-          "",
           "Vision (if enabled):",
           "  Left Click  | Set Waypoint / Click-to-Go",
           "  V           | Toggle Click-Delta Overlay",
           "  C           | Clear Click Point",
           "  P           | Start/Stop Video Recording",
-          "",
           "Exit:",
           "  Backspace   | Quit Program"
         ]
