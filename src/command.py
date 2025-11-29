@@ -1417,6 +1417,7 @@ class Command:
           "  H           | Autonomous Hover (one-shot)",
           "  G           | Take Off (Manual Mode)",
           "  L           | Land / Exit Manual",
+          "  B           | Back-and-Forth Motion Test (vision-verified)",
           "Swarm Commands:",
           "  S           | SWARM Take Off (All Drones)",
           "  K           | SWARM Land / Exit",
@@ -1434,6 +1435,7 @@ class Command:
           "  V           | Toggle Click-Delta Overlay",
           "  C           | Clear Click Point",
           "  P           | Start/Stop Video Recording",
+          "  (Back-and-Forth: video tints green on PASS, red on FAIL)",
           "Exit:",
           "  Backspace   | Quit Program"
         ]
