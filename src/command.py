@@ -162,6 +162,20 @@ class Command:
     self._c2g_last = {"fx": None, "fy": None, "t": 0.0}
     self._c2g_debounce_s = 0.4
 
+    # Back-and-forth motion test config (single-drone)
+    self.bf_target_m = helpers._f(os.getenv("BF_TARGET_M"), default=0.5)
+    self.bf_dwell_s = helpers._f(os.getenv("BF_DWELL_S"), default=3.0)
+    self.bf_cycles = int(helpers._f(os.getenv("BF_CYCLES"), default=1))
+    self.bf_tol_m = helpers._f(os.getenv("BF_TOL_M"), default=0.10)
+    # Pixels-per-meter for converting image-plane displacements to approximate 
+    # meters. If <= 0, units are "pixels".
+    self.bf_px_per_m = helpers._f(os.getenv("BF_PX_PER_M"), default=0.0)
+
+    # Back-and-forth runtime state (shared with HUD)
+    self._bf_thread: threading.Thread | None = None
+    self._bf_running = threading.Event()
+    self._bf_status: dict | None = None
+
     # waypoints (thread-safe)
     self._waypoints: list[Waypoint] = []
     self._wp_lock = threading.Lock()
@@ -610,6 +624,221 @@ class Command:
       time.sleep(5.0)
       sys.exit()
 
+  def _start_back_and_forth(self):
+    """
+    Launch the single-drone back-and-forth routine in a background thread.
+    Vision is verification-only; this does not close the control loop.
+    """
+    # Avoid re-entrancy
+    if self._bf_thread and self._bf_thread.is_alive():
+      logger.info("Back-and-forth routine already running; ignoring trigger.")
+      return
+
+    # Do not interfere with existing manual/swarm modes
+    if self.manual_active or self.swarm_active:
+      logger.warning("Back-and-forth ignored: manual/swarm mode already active.")
+      return
+
+    # Defensive: require an attached Crazyflie and an active detector
+    if getattr(self, "scf", None) is None:
+      logger.warning("Back-and-forth ignored: no Crazyflie connection.")
+      return
+
+    det = self._get_detector()
+    if det is None:
+      logger.warning("Back-and-forth ignored: vision/detector is not initialized.")
+      return
+
+    self._bf_running.set()
+    self._bf_thread = threading.Thread(target=self._run_back_and_forth,
+                                       name="back_forth",
+                                       daemon=True)
+    self._bf_thread.start()
+
+  def _run_back_and_forth(self):
+    """
+    Perform an open-loop back-and-forth motion and log vision-based verification.
+    """
+    det = self._get_detector()
+    if det is None:
+      logger.warning("Back-and-forth aborted: detector unavailable.")
+      self._bf_running.clear()
+      return
+
+    target_m = float(self.bf_target_m)
+    dwell_s = float(self.bf_dwell_s)
+    cycles = max(1, int(self.bf_cycles))
+    tol_m = float(self.bf_tol_m)
+    px_per_m = float(self.bf_px_per_m)
+
+    logger.info(f"Back-and-forth: starting routine "
+                f"(cycles={cycles}, target={target_m:.3f}, dwell={dwell_s:.1f}s, "
+                f"tol={tol_m:.3f}, px_per_m={px_per_m:.1f})")
+
+    # Ensure MotionCommander
+    if self.mc is None:
+      try:
+        self.mc = MotionCommander(self.scf)
+      except Exception as e:
+        logger.error(f"Back-and-forth: cannot create MotionCommander: {e}")
+        self._bf_running.clear()
+        return
+
+    # Try takeoff to configured hover height; if already flying this is a no-op/raises
+    try:
+      self.mc.take_off(self.takeoff_alt, velocity=0.4)
+    except Exception as e:
+      logger.debug(f"Back-and-forth: take_off skipped or failed: {e}")
+
+    def _get_centroid():
+      """
+      Return (cx, cy) of the primary ArUco marker in the latest frame, or None.
+      """
+      try:
+        frame, res = det.latest()
+      except Exception as e:
+        logger.debug(f"Back-and-forth: detector.latest() failed: {e}")
+        return None
+
+      if frame is None or not res:
+        return None
+
+      tgt = vision.primary_target(res, frame.shape)
+
+      if not tgt:
+        return None
+
+      cx, cy, area, W, H = tgt
+      return (cx, cy)
+
+    def _wait_for_tag(timeout_s: float = 2.0):
+      """
+      Wait briefly for at least one centroid sample; return the first seen or None.
+      """
+      deadline = time.time() + max(0.0, timeout_s)
+      last = None
+
+      while time.time() < deadline and self._bf_running.is_set():
+        p = _get_centroid()
+
+        if p:
+          last = p
+          break
+        time.sleep(0.05)
+
+      return last
+
+    def _eval_leg(cycle_idx: int, leg: str, p0, p1):
+      """
+      Compute displacement and PASS/FAIL for a single forward/backward leg.
+      """
+      disp_px = None
+      disp_m = None
+      ok = False
+
+      if p0 is not None and p1 is not None:
+        dx = float(p1[0] - p0[0])
+        dy = float(p1[1] - p0[1])
+        disp_px = math.hypot(dx, dy)
+
+        if px_per_m > 0.0:
+          disp_m = disp_px / px_per_m
+          err = abs(disp_m - target_m)
+          ok = err <= tol_m
+        else:
+          # Treat target/tolerance in the same arbitrary "pixel units"
+          err = abs(disp_px - target_m)
+          ok = err <= tol_m
+
+      # Update HUD-visible status
+      self._bf_status = {
+        "ts": time.time(),
+        "cycle": cycle_idx,
+        "leg": leg,
+        "disp_px": disp_px,
+        "disp_m": disp_m,
+        "target": target_m,
+        "tol": tol_m,
+        "ok": ok,
+      }
+
+      if disp_px is None:
+        logger.warning(f"Back-and-forth: cycle={cycle_idx} leg={leg}: no vision data; marking FAIL.")
+      else:
+        msg = (f"Back-and-forth: cycle={cycle_idx} leg={leg} disp_px={disp_px:.1f}")
+
+        if disp_m is not None:
+          msg += f" disp_m={disp_m:.3f}"
+
+        msg += f" target={target_m:.3f} tol={tol_m:.3f} PASS={ok}"
+        logger.info(msg)
+
+    try:
+      for cycle in range(1, cycles + 1):
+        if not self._bf_running.is_set():
+          break
+
+        # FORWARD leg
+        p0 = _wait_for_tag()
+        try:
+          logger.info(f"Back-and-forth: cycle={cycle} forward leg: +{target_m:.3f} m.")
+          # Use distance-based MotionCommander move; open-loop w.r.t. vision
+          self.mc.forward(target_m)
+        except Exception as e:
+          logger.error(f"Back-and-forth: forward command failed: {e}")
+
+        end_time = time.time() + dwell_s
+        p1 = None
+        samples = 0
+
+        while time.time() < end_time and self._bf_running.is_set():
+          p = _get_centroid()
+
+          if p:
+            p1 = p
+            samples += 1
+          time.sleep(0.1)
+
+        if p1 is None:
+          p1 = _get_centroid()
+
+        _eval_leg(cycle, "forward", p0, p1)
+        logger.debug(f"Back-and-forth: cycle={cycle} forward leg samples={samples}")
+
+        if not self._bf_running.is_set():
+          break
+
+        # BACKWARD leg
+        p0b = _wait_for_tag()
+
+        try:
+          logger.info(f"Back-and-forth: cycle={cycle} backward leg: -{target_m:.3f} m.")
+          self.mc.back(target_m)
+        except Exception as e:
+          logger.error(f"Back-and-forth: backward command failed: {e}")
+
+        end_time = time.time() + dwell_s
+        p1b = None
+        samples_b = 0
+
+        while time.time() < end_time and self._bf_running.is_set():
+          p = _get_centroid()
+
+          if p:
+            p1b = p
+            samples_b += 1
+          time.sleep(0.1)
+
+        if p1b is None:
+          p1b = _get_centroid()
+
+        _eval_leg(cycle, "backward", p0b, p1b)
+        logger.debug(f"Back-and-forth: cycle={cycle} backward leg samples={samples_b}")
+
+      logger.info("Back-and-forth: routine complete.")
+    finally:
+      self._bf_running.clear()
+
   def _hover(self):
     mc = MotionCommander(self.scf)
 
@@ -946,6 +1175,13 @@ class Command:
               except Exception as e:
                 logger.warning(f"Swarm formation call failed (spin): {e}")
 
+            # Single-drone back-and-forth motion (vision-verified)
+            if event.key == pygame.K_b:
+              try:
+                self._start_back_and_forth()
+              except Exception as e:
+                logger.warning(f"Back-and-forth trigger failed: {e}")
+
             # Vision overlay hotkeys
             if event.key == pygame.K_v:
               try:
@@ -1123,6 +1359,14 @@ class Command:
             if self.wp_hud:
               self._draw_waypoints_on_video(surf, last_draw)
 
+            # Back-and-forth PASS/FAIL overlay tint (multi-window video)
+            bf = self._bf_status
+            if bf and bf.get("ok") is not None:
+              r, g, b = ((0, 120, 0) if bf.get("ok") else (120, 0, 0))
+              tint = pygame.Surface((tw, th), pygame.SRCALPHA)
+              tint.fill((r, g, b, 60))  # low alpha so image is still visible
+              canvas.blit(tint, (x0, y0))
+
             _blit_texture(video_ren, canvas)
 
             # Save for click mapping
@@ -1155,6 +1399,14 @@ class Command:
             # overlay markers directly on scaled video region
             if self.wp_hud:
               self._draw_waypoints_on_video(surf, last_draw)
+
+            # Back-and-forth PASS/FAIL overlay tint (single-window video)
+            bf = self._bf_status
+            if bf and bf.get("ok") is not None:
+              r, g, b = ((0, 120, 0) if bf.get("ok") else (120, 0, 0))
+              tint = pygame.Surface((tw, th), pygame.SRCALPHA)
+              tint.fill((r, g, b, 60))
+              screen.blit(tint, (x0, y0))
 
             last_draw.update({"x0": x0, "y0": y0, "tw": tw, "th": th, "fw": fw, "fh": fh})
 
@@ -1231,6 +1483,36 @@ class Command:
           except Exception: 
             pass
 
+          # Back-and-forth verification HUD
+          try:
+            bf = self._bf_status
+
+            if bf:
+              status = "PASS" if bf.get("ok") else "FAIL"
+              cycle = bf.get("cycle")
+              leg = bf.get("leg")
+              disp_px = bf.get("disp_px")
+              disp_m = bf.get("disp_m")
+              line1 = f"Back&Forth: cycle {cycle} leg {leg} [{status}]"
+              t = font.render(line1, True, (230, 230, 180))
+              panel.blit(t, (x, y))
+              y += t.get_height() + 4
+
+              if disp_px is not None:
+                if disp_m is not None:
+                  line2 = (f"  disp_px={disp_px:.1f}  "
+                           f"disp_m={disp_m:.2f} m  "
+                           f"(target={self.bf_target_m:.2f}, tol={self.bf_tol_m:.2f})")
+                else:
+                  line2 = (f"  disp_px={disp_px:.1f}  "
+                           f"(target={self.bf_target_m:.2f}, tol={self.bf_tol_m:.2f})")
+                t2 = font.render(line2, True, (200, 200, 200))
+                panel.blit(t2, (x, y))
+                y += t2.get_height() + 6
+
+          except Exception:
+            pass
+
           for line in instructions:
             t = font.render(line, True, (230, 230, 230)); panel.blit(t, (x, y)); y += t.get_height() + 6
             if y > ch - 8: 
@@ -1269,6 +1551,35 @@ class Command:
             screen.blit(t, (x, y))
             y += t.get_height() + 8
           except Exception: 
+            pass
+
+          # Back-and-forth verification HUD
+          try:
+            bf = self._bf_status
+            if bf:
+              status = "PASS" if bf.get("ok") else "FAIL"
+              cycle = bf.get("cycle")
+              leg = bf.get("leg")
+              disp_px = bf.get("disp_px")
+              disp_m = bf.get("disp_m")
+              line1 = f"Back&Forth: cycle {cycle} leg {leg} [{status}]"
+              t = font.render(line1, True, (230, 230, 180))
+              screen.blit(t, (x, y))
+              y += t.get_height() + 4
+
+              if disp_px is not None:
+                if disp_m is not None:
+                  line2 = (f"  disp_px={disp_px:.1f}  "
+                           f"disp_m={disp_m:.2f} m  "
+                           f"(target={self.bf_target_m:.2f}, tol={self.bf_tol_m:.2f})")
+                else:
+                  line2 = (f"  disp_px={disp_px:.1f}  "
+                           f"(target={self.bf_target_m:.2f}, tol={self.bf_tol_m:.2f})")
+                t2 = font.render(line2, True, (200, 200, 200))
+                screen.blit(t2, (x, y))
+                y += t2.get_height() + 6
+
+          except Exception:
             pass
 
           for line in instructions:
