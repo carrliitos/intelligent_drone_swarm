@@ -1003,7 +1003,7 @@ class DetectorRT:
 
     # Overlays
     self._overlay_grid(frame)
-    self._overlay_click_delta(frame, results)
+    # self._overlay_click_delta(frame, results)
     self._mark_occupied(frame) # Highlight the occupied cells and then draw grid
 
     try:

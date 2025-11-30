@@ -163,7 +163,7 @@ class Command:
     self._c2g_debounce_s = 0.4
 
     # Back-and-forth motion test config (single-drone)
-    self.bf_target_m = helpers._f(os.getenv("BF_TARGET_M"), default=0.5)
+    self.bf_target_m = helpers._f(os.getenv("BF_TARGET_M"), default=0.25)
     self.bf_dwell_s = helpers._f(os.getenv("BF_DWELL_S"), default=3.0)
     self.bf_cycles = int(helpers._f(os.getenv("BF_CYCLES"), default=1))
     self.bf_tol_m = helpers._f(os.getenv("BF_TOL_M"), default=0.10)
@@ -180,6 +180,12 @@ class Command:
     self._waypoints: list[Waypoint] = []
     self._wp_lock = threading.Lock()
     self._latest_frame_idx = 0
+
+    # Manual target verification (user-driven flight)
+    self.target_mode = True
+    self.target_tol_px = helpers._f(os.getenv("TARGET_TOL_PX"), default=0.6 * helpers._i(os.getenv("GRID_STEP_PX"), default=30))
+    self._targets = []
+    self._target_status = None  # {"ts", "total", "hit", "ok"} or None
 
   @property
   def detector(self):
@@ -336,6 +342,67 @@ class Command:
           f.write(json.dumps(rec, separators=(",", ":")) + "\n")
       except Exception as e:
         logger.warning(f"Waypoint log write failed: {e}")
+
+  def _update_target_hits_from_vision(self):
+    """
+    In target_mode, use the latest ArUco centroid to mark targets as 'hit'
+    when the drone comes within target_tol_px in the image plane.
+    Updates self._target_status for HUD/overlay.
+    """
+    if not self.target_mode:
+      return
+
+    # No targets: no PASS/FAIL status
+    if not self._targets:
+      self._target_status = None
+      return
+
+    det = self._get_detector()
+    if det is None:
+      return
+
+    try:
+      frame, res = det.latest()
+    except Exception as e:
+      logger.debug(f"target verify: detector.latest() failed: {e}")
+      return
+
+    if frame is None or not res:
+      return
+
+    tgt = vision.primary_target(res, frame.shape)
+    if not tgt:
+      return
+
+    cx, cy, area, W, H = tgt
+    tol = float(self.target_tol_px)
+    hit_count = 0
+    total = 0
+
+    with self._wp_lock:
+      total = len(self._targets)
+      for t in self._targets:
+
+        if t.get("hit"):
+          hit_count += 1
+          continue
+
+        dx = float(cx) - float(t["fx"])
+        dy = float(cy) - float(t["fy"])
+        d = math.hypot(dx, dy)
+
+        if d <= tol:
+          t["hit"] = True
+          hit_count += 1
+
+    ok = (total > 0 and hit_count == total)
+
+    self._target_status = {
+      "ts": time.time(),
+      "total": total,
+      "hit": hit_count,
+      "ok": ok,
+    }
 
   def start_click_to_go(self, fx: int, fy: int):
     """
@@ -545,6 +612,51 @@ class Command:
         # tiny index label
         lbl = pygame.font.SysFont("monospace", 12).render(str(idx), True, color)
         surface.blit(lbl, (sx + 4, sy + 2))
+
+  def _draw_targets_on_video(self, surface: "pygame.Surface", last_draw: dict, color=(220, 60, 60)):
+    """Draw manual target cells (from B-mode) as persistent red rectangles.
+
+    Each target is stored in detector-frame pixels (fx, fy). This helper maps
+    them into the current preview surface size (tw, th), then snaps to the
+    nearest GRID_STEP_PX cell so clicked cells line up with the OpenCV grid.
+    Targets marked as "hit" are skipped so they visually disappear once the
+    drone has flown over them.
+    """
+    # Only draw while the manual grid game is active
+    if not self.target_mode:
+      return
+
+    tw = last_draw.get("tw", 0)
+    th = last_draw.get("th", 0)
+    fw = last_draw.get("fw", 0)
+    fh = last_draw.get("fh", 0)
+    if tw <= 0 or th <= 0 or fw <= 0 or fh <= 0:
+      return
+
+    step_px = helpers._i(os.getenv("GRID_STEP_PX"), default=30)
+    if step_px <= 0:
+      step_px = 30
+
+    with self._wp_lock:
+      for t in self._targets:
+        if t.get("hit"):
+          continue
+
+        fx = t.get("fx")
+        fy = t.get("fy")
+        if fx is None or fy is None:
+          continue
+
+        # Map detector frame -> preview surface
+        sx = int(round((fx / max(1, fw - 1)) * tw))
+        sy = int(round((fy / max(1, fh - 1)) * th))
+
+        # Snap to grid cell
+        gx = (sx // step_px) * step_px
+        gy = (sy // step_px) * step_px
+
+        rect = pygame.Rect(gx, gy, step_px, step_px)
+        pygame.draw.rect(surface, color, rect, width=2)
 
   def set_vision_hooks(self, on_click=None, on_toggle=None, on_clear=None):
     """
@@ -1108,35 +1220,35 @@ class Command:
           if event.type == pygame.QUIT:
             done = True
             break
-          # left-click anywhere on the stream -> send to DetectorRT
-          if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-            # Only accepting clicks inside the video window on dual-window mode
-            if _has_multiwin():
-              # MOUSEBUTTONDOWN carries window position already local
-              mx, my = event.pos
-              mapped = _map_click(mx, my)
-              if mapped and self._vision_click:
-                fx, fy = mapped
-                # Forward to detector (will draw crosshair + delta on next frame)
-                try:
-                  self._vision_click(fx, fy)
-                except Exception as e:
-                  logger.debug(f"on_click failed: {e}")
 
-                # Log waypoint (no command dispatch)
-                try:
-                  self._append_waypoint(mx, my, fx, fy)
+        # left-click on the PyGame video -> waypoint + target (or click-to-go)
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+          mx, my = event.pos
+          mapped = _map_click(mx, my)
+          if not mapped:
+            logger.debug("Click ignored (outside video).")
+          else:
+            fx, fy = mapped
+            # track for HUD
+            last_click_pg = (mx, my)
+            last_click_cv = (fx, fy)
 
-                  # Start closed-loop controller for this click
-                  if fx is not None and fy is not None:
-                    try:
-                      self.start_click_to_go(fx, fy)
-                    except Exception as e:
-                      logger.debug(f"click2go: failed to start: {e}")
-                except Exception as e:
-                  logger.debug(f"waypoint append failed: {e}")
-              else:
-                logger.debug("Click ignored (outside video).")
+            try:
+              if self._vision_click:
+                self._vision_click(fx, fy)
+            except Exception as e:
+              logger.debug(f"on_click failed: {e}")
+
+            # Log waypoint and then register a manual target (no click-to-go for the demo)
+            try:
+              self._append_waypoint(mx, my, fx, fy)
+
+              if self.target_mode and fx is not None and fy is not None:
+                with self._wp_lock:
+                  self._targets.append({"fx": int(fx), "fy": int(fy), "hit": False})
+                logger.info(f"Target added at frame coords ({fx}, {fy})")
+            except Exception as e:
+              logger.debug(f"waypoint/target append failed: {e}")
 
           if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_BACKSPACE:
@@ -1175,12 +1287,16 @@ class Command:
               except Exception as e:
                 logger.warning(f"Swarm formation call failed (spin): {e}")
 
-            # Single-drone back-and-forth motion (vision-verified)
+            # Manual target verification: toggle grid game mode (user-driven flight)
             if event.key == pygame.K_b:
-              try:
-                self._start_back_and_forth()
-              except Exception as e:
-                logger.warning(f"Back-and-forth trigger failed: {e}")
+              self.target_mode = not self.target_mode
+
+              with self._wp_lock:
+                self._targets = []
+
+              self._target_status = None
+              state = "ENABLED" if self.target_mode else "DISABLED"
+              logger.info(f"Manual target verification mode {state} (B).")
 
             # Vision overlay hotkeys
             if event.key == pygame.K_v:
@@ -1333,6 +1449,12 @@ class Command:
         except Exception as e:
           logger.debug(f"preview copy failed: {e}")
 
+        # Per-frame manual target verification update (vision-only, no control)
+        try:
+          self._update_target_hits_from_vision()
+        except Exception as e:
+          logger.debug(f"target verify: update failed: {e}")
+
         if _has_multiwin():
           # size of the video window
           vw, vh = video_win.size
@@ -1353,11 +1475,25 @@ class Command:
             # build a target surface matching window size to center-blit
             canvas = pygame.Surface((vw, vh))
             canvas.fill((0,0,0))
-            canvas.blit(surf, (x0, y0))
 
-            # Draw waypoint markers onto the video area
+            # Save mapping for both click-mapping and overlays
+            last_draw.update({"x0": x0, "y0": y0, "tw": tw, "th": th, "fw": fw, "fh": fh})
+
+            # Draw waypoint markers and manual targets directly on the scaled video
             if self.wp_hud:
               self._draw_waypoints_on_video(surf, last_draw)
+            self._draw_targets_on_video(surf, last_draw)
+
+            # Center-blit the annotated video surface into the window canvas
+            canvas.blit(surf, (x0, y0))
+
+            # Manual target verification PASS/FAIL tint (multi-window video)
+            status = self._target_status
+            if status and status.get("ok") is not None:
+              r, g, b = ((0, 120, 0) if status["ok"] else (120, 0, 0))
+              tint = pygame.Surface((tw, th), pygame.SRCALPHA)
+              tint.fill((r, g, b, 60))  # low alpha so image is still visible
+              canvas.blit(tint, (x0, y0))
 
             # Back-and-forth PASS/FAIL overlay tint (multi-window video)
             bf = self._bf_status
@@ -1394,11 +1530,21 @@ class Command:
 
             x0 = (VIDEO_W - tw) // 2
             y0 = (VIDEO_H - th) // 2
-            screen.blit(surf, (x0, y0))
-
-            # overlay markers directly on scaled video region
+            # Overlay markers directly on scaled video region
             if self.wp_hud:
               self._draw_waypoints_on_video(surf, last_draw)
+            self._draw_targets_on_video(surf, last_draw)
+
+            # Blit the annotated video to the main screen
+            screen.blit(surf, (x0, y0))
+
+            # Manual target verification PASS/FAIL tint (single-window video)
+            status = self._target_status
+            if status and status.get("ok") is not None:
+              r, g, b = ((0, 120, 0) if status["ok"] else (120, 0, 0))
+              tint = pygame.Surface((tw, th), pygame.SRCALPHA)
+              tint.fill((r, g, b, 60))
+              screen.blit(tint, (x0, y0))
 
             # Back-and-forth PASS/FAIL overlay tint (single-window video)
             bf = self._bf_status
@@ -1417,7 +1563,7 @@ class Command:
           "  H           | Autonomous Hover (one-shot)",
           "  G           | Take Off (Manual Mode)",
           "  L           | Land / Exit Manual",
-          "  B           | Back-and-Forth Motion Test (vision-verified)",
+          "  B           | Toggle Target Mode (manual grid challenge)",
           "Swarm Commands:",
           "  S           | SWARM Take Off (All Drones)",
           "  K           | SWARM Land / Exit",
@@ -1431,11 +1577,8 @@ class Command:
           "  A / D       | Yaw Left / Right",
           "  R / F       | Altitude Up / Down",
           "Vision (if enabled):",
-          "  Left Click  | Set Waypoint / Click-to-Go",
-          "  V           | Toggle Click-Delta Overlay",
-          "  C           | Clear Click Point",
-          "  P           | Start/Stop Video Recording",
-          "  (Back-and-Forth: video tints green on PASS, red on FAIL)",
+          "  Left Click  | Add Target Cell (manual grid game)",
+          "  (Target Mode: video tints green when all clicked targets are reached, red otherwise)",
           "Exit:",
           "  Backspace   | Quit Program"
         ]
@@ -1485,6 +1628,31 @@ class Command:
           except Exception: 
             pass
 
+          # Manual target verification HUD
+          try:
+            status = self._target_status
+            if status:
+              mode = "ON" if self.target_mode else "OFF"
+              line1 = f"Targets mode: {mode}"
+              t = font.render(line1, True, (230, 230, 180))
+              panel.blit(t, (x, y))
+              y += t.get_height() + 4
+
+              total = int(status.get("total") or 0)
+              hit = int(status.get("hit") or 0)
+              ok = status.get("ok")
+              suffix = ""
+              if ok is True:
+                suffix = " [PASS]"
+              elif ok is False:
+                suffix = " [FAIL]"
+              line2 = f"  Targets hit: {hit}/{total}{suffix}"
+              t2 = font.render(line2, True, (200, 200, 200))
+              panel.blit(t2, (x, y))
+              y += t2.get_height() + 8
+          except Exception:
+            pass
+
           # Back-and-forth verification HUD
           try:
             bf = self._bf_status
@@ -1529,7 +1697,34 @@ class Command:
           panel.fill((18, 18, 22, 220))
           screen.blit(panel, (0, info_y))
           x, y = pad_x, info_y + pad_y
-          
+
+          # Manual target verification HUD
+          try:
+            status = self._target_status
+            if status:
+              mode = "ON" if self.target_mode else "OFF"
+              line1 = f"Targets mode: {mode}"
+              t = font.render(line1, True, (230, 230, 180))
+              screen.blit(t, (x, y))
+              y += t.get_height() + 4
+
+              total = int(status.get("total") or 0)
+              hit = int(status.get("hit") or 0)
+              ok = status.get("ok")
+              suffix = ""
+
+              if ok is True:
+                suffix = " [PASS]"
+              elif ok is False:
+                suffix = " [FAIL]"
+
+              line2 = f"  Targets hit: {hit}/{total}{suffix}"
+              t2 = font.render(line2, True, (200, 200, 200))
+              screen.blit(t2, (x, y))
+              y += t2.get_height() + 8
+          except Exception:
+            pass
+
           txt_ids = font.render(ids_text, True, (120, 200, 255))
           screen.blit(txt_ids, (x, y))
           y += txt_ids.get_height() + 10 
