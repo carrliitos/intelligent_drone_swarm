@@ -375,6 +375,7 @@ class Command:
       return
 
     cx, cy, area, W, H = tgt
+    frame_w, frame_h = float(W), float(H)
     tol = float(self.target_tol_px)
     hit_count = 0
     total = 0
@@ -387,8 +388,21 @@ class Command:
           hit_count += 1
           continue
 
-        dx = float(cx) - float(t["fx"])
-        dy = float(cy) - float(t["fy"])
+        # Prefer normalized click coords if available, fall back to stored frame pixels
+        rx = t.get("rx")
+        ry = t.get("ry")
+        if rx is not None and ry is not None:
+          tx = float(rx) * max(1.0, frame_w - 1.0)
+          ty = float(ry) * max(1.0, frame_h - 1.0)
+        elif t.get("fx") is not None and t.get("fy") is not None:
+          tx = float(t["fx"])
+          ty = float(t["fy"])
+        else:
+          # Nothing to compare against
+          continue
+
+        dx = float(cx) - tx
+        dy = float(cy) - ty
         d = math.hypot(dx, dy)
 
         if d <= tol:
@@ -616,8 +630,11 @@ class Command:
   def _draw_targets_on_video(self, surface: "pygame.Surface", last_draw: dict, color=(220, 60, 60)):
     """Draw manual target cells (from B-mode) as persistent red rectangles.
 
-    Each target is stored in detector-frame pixels (fx, fy). This helper maps
-    them into the current preview surface size (tw, th), then snaps to the
+    Each target stores:
+      - rx, ry: normalized click coordinates in [0,1]×[0,1] in the video region
+      - fx, fy: detector-frame pixels (for vision-based hit checks / logging)
+
+    We map (rx, ry) into the current preview size (tw, th), then snap to the
     nearest GRID_STEP_PX cell so clicked cells line up with the OpenCV grid.
     Targets marked as "hit" are skipped so they visually disappear once the
     drone has flown over them.
@@ -630,7 +647,8 @@ class Command:
     th = last_draw.get("th", 0)
     fw = last_draw.get("fw", 0)
     fh = last_draw.get("fh", 0)
-    if tw <= 0 or th <= 0 or fw <= 0 or fh <= 0:
+
+    if tw <= 0 or th <= 0:
       return
 
     step_px = helpers._i(os.getenv("GRID_STEP_PX"), default=30)
@@ -642,14 +660,21 @@ class Command:
         if t.get("hit"):
           continue
 
-        fx = t.get("fx")
-        fy = t.get("fy")
-        if fx is None or fy is None:
-          continue
+        rx = t.get("rx")
+        ry = t.get("ry")
 
-        # Map detector frame -> preview surface
-        sx = int(round((fx / max(1, fw - 1)) * tw))
-        sy = int(round((fy / max(1, fh - 1)) * th))
+        if rx is None or ry is None:
+          # Backwards compat: reconstruct normalized coords from stored frame pixels
+          fx = t.get("fx")
+          fy = t.get("fy")
+          if fx is None or fy is None or fw <= 0 or fh <= 0:
+            continue
+          rx = float(fx) / max(1.0, float(fw) - 1.0)
+          ry = float(fy) / max(1.0, float(fh) - 1.0)
+
+        # Map normalized click back into the current preview surface
+        sx = int(round(float(rx) * tw))
+        sy = int(round(float(ry) * th))
 
         # Snap to grid cell
         gx = (sx // step_px) * step_px
@@ -1233,6 +1258,17 @@ class Command:
             last_click_pg = (mx, my)
             last_click_cv = (fx, fy)
 
+            # normalized click within the drawn video rect (for robust target drawing)
+            x0, y0 = last_draw["x0"], last_draw["y0"]
+            tw, th = last_draw["tw"], last_draw["th"]
+            if tw > 0 and th > 0:
+              rx = (mx - x0) / float(tw)
+              ry = (my - y0) / float(th)
+              rx = max(0.0, min(1.0, rx))
+              ry = max(0.0, min(1.0, ry))
+            else:
+              rx = ry = None
+
             try:
               if self._vision_click:
                 self._vision_click(fx, fy)
@@ -1245,8 +1281,17 @@ class Command:
 
               if self.target_mode and fx is not None and fy is not None:
                 with self._wp_lock:
-                  self._targets.append({"fx": int(fx), "fy": int(fy), "hit": False})
-                logger.info(f"Target added at frame coords ({fx}, {fy})")
+                  self._targets.append({
+                    "fx": int(fx),
+                    "fy": int(fy),
+                    "rx": float(rx) if rx is not None else None,
+                    "ry": float(ry) if ry is not None else None,
+                    "hit": False,
+                  })
+                msg = f"Target added at frame coords ({fx}, {fy})"
+                if rx is not None and ry is not None:
+                  msg += f" norm=({rx:.3f},{ry:.3f})"
+                logger.info(msg)
             except Exception as e:
               logger.debug(f"waypoint/target append failed: {e}")
 
@@ -1530,6 +1575,10 @@ class Command:
 
             x0 = (VIDEO_W - tw) // 2
             y0 = (VIDEO_H - th) // 2
+
+            # Save mapping for this frame so clicks and overlays share geometry
+            last_draw.update({"x0": x0, "y0": y0, "tw": tw, "th": th, "fw": fw, "fh": fh})
+
             # Overlay markers directly on scaled video region
             if self.wp_hud:
               self._draw_waypoints_on_video(surf, last_draw)
@@ -1546,15 +1595,13 @@ class Command:
               tint.fill((r, g, b, 60))
               screen.blit(tint, (x0, y0))
 
-            # Back-and-forth PASS/FAIL overlay tint (single-window video)
+            # Back-and-forth verification PASS/FAIL overlay tint (single-window video)
             bf = self._bf_status
             if bf and bf.get("ok") is not None:
               r, g, b = ((0, 120, 0) if bf.get("ok") else (120, 0, 0))
               tint = pygame.Surface((tw, th), pygame.SRCALPHA)
               tint.fill((r, g, b, 60))
               screen.blit(tint, (x0, y0))
-
-            last_draw.update({"x0": x0, "y0": y0, "tw": tw, "th": th, "fw": fw, "fh": fh})
 
         instructions = [
           "Drone Control",
