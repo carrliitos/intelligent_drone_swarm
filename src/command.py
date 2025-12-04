@@ -1263,63 +1263,63 @@ class Command:
             done = True
             break
 
-        # left-click on the PyGame video -> waypoint + target (or click-to-go)
-        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-          mx, my = event.pos
-          mapped = _map_click(mx, my)
-          if not mapped:
-            logger.debug("Click ignored (outside video).")
-          else:
-            fx, fy = mapped
-            # track for HUD
-            last_click_pg = (mx, my)
-            last_click_cv = (fx, fy)
-
-            # normalized click within the drawn video rect (for robust target drawing)
-            x0, y0 = last_draw["x0"], last_draw["y0"]
-            tw, th = last_draw["tw"], last_draw["th"]
-            if tw > 0 and th > 0:
-              rx = (mx - x0) / float(tw)
-              ry = (my - y0) / float(th)
-              rx = max(0.0, min(1.0, rx))
-              ry = max(0.0, min(1.0, ry))
+          # left-click on the PyGame video -> waypoint  target (or click-to-go)
+          if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            mx, my = event.pos
+            mapped = _map_click(mx, my)
+            if not mapped:
+              logger.debug("Click ignored (outside video).")
             else:
-              rx = ry = None
+              fx, fy = mapped
+              # track for HUD
+              last_click_pg = (mx, my)
+              last_click_cv = (fx, fy)
 
-            det = self._get_detector()
-            try:
-              if det:
-                if rx is not None and ry is not None and hasattr(det, "set_click_point_normalized"):
-                  det.set_click_point_normalized(rx, ry)
-                else:
-                  det.set_click_point(fx, fy)
+              # normalized click within the drawn video rect (for robust target drawing)
+              x0, y0 = last_draw["x0"], last_draw["y0"]
+              tw, th = last_draw["tw"], last_draw["th"]
+              if tw > 0 and th > 0:
+                rx = (mx - x0) / float(tw)
+                ry = (my - y0) / float(th)
+                rx = max(0.0, min(1.0, rx))
+                ry = max(0.0, min(1.0, ry))
+              else:
+                rx = ry = None
 
-              if self._vision_click:
-                self._vision_click(fx, fy)
-            except Exception as e:
-              logger.debug(f"on_click failed: {e}")
+              det = self._get_detector()
+              try:
+                if det:
+                  if rx is not None and ry is not None and hasattr(det, "set_click_point_normalized"):
+                    det.set_click_point_normalized(rx, ry)
+                  else:
+                    det.set_click_point(fx, fy)
 
-            # Log waypoint and then register a manual target (no click-to-go for the demo)
-            try:
-              self._append_waypoint(mx, my, fx, fy)
+                if self._vision_click:
+                  self._vision_click(fx, fy)
+              except Exception as e:
+                logger.debug(f"on_click failed: {e}")
 
-              if self.target_mode and fx is not None and fy is not None:
-                with self._wp_lock:
-                  self._targets.append({
-                    "fx": int(fx),
-                    "fy": int(fy),
-                    "rx": float(rx) if rx is not None else None,
-                    "ry": float(ry) if ry is not None else None,
-                    "hit": False,
-                  })
-                msg = f"Target added at frame coords ({fx}, {fy})"
-                if rx is not None and ry is not None:
-                  msg += f" norm=({rx:.3f},{ry:.3f})"
-                logger.info(msg)
-            except Exception as e:
-              logger.debug(f"waypoint/target append failed: {e}")
+              # Log waypoint and then register a manual target (no click-to-go for the demo)
+              try:
+                self._append_waypoint(mx, my, fx, fy)
 
-          if event.type == pygame.KEYDOWN:
+                if self.target_mode and fx is not None and fy is not None:
+                  with self._wp_lock:
+                    self._targets.append({
+                      "fx": int(fx),
+                      "fy": int(fy),
+                      "rx": float(rx) if rx is not None else None,
+                      "ry": float(ry) if ry is not None else None,
+                      "hit": False,
+                    })
+                  msg = f"Target added at frame coords ({fx}, {fy})"
+                  if rx is not None and ry is not None:
+                    msg += f" norm=({rx:.3f},{ry:.3f})"
+                  logger.info(msg)
+              except Exception as e:
+                logger.debug(f"waypoint/target append failed: {e}")
+
+          elif event.type == pygame.KEYDOWN:
             if event.key == pygame.K_BACKSPACE:
               done = True
 
@@ -1350,27 +1350,28 @@ class Command:
               except Exception as e:
                 logger.warning(f"Swarm formation call failed (oscillate): {e}")
 
-            if event.key == pygame.K_5:
-              # Swarm case: keep existing spin behavior.
-              if self.swarm:
-                try:
-                  self.swarm.form_spin()
-                except Exception as e:
-                  logger.warning(f"Swarm formation call failed (spin): {e}")
-              else:
-                # Single-drone demo: launch back-and-forth routine.
-                logger.info("Back-and-forth demo: triggering single-drone routine (K=5).")
-                try:
-                  # If we're currently in single-drone manual mode, drop out of manual
-                  # so the background routine has exclusive control of the MotionCommander.
+            if event.key == pygame.K_5 and self.swarm:
+              try:
+                self.swarm.form_spin()
+              except Exception as e:
+                logger.warning(f"Swarm formation call failed (spin): {e}")
+
+            # X = single-drone back-and-forth demo
+            if event.key == pygame.K_x:
+              logger.info("Back-and-forth demo: trigger requested (X).")
+              try:
+                if self.swarm_active:
+                  logger.warning("Back-and-forth (X) ignored: swarm mode active.")
+                else:
+                  # If currently in manual mode, drop out so the routine has exclusive control.
                   if self.manual_active:
                     logger.info("Back-and-forth: exiting manual mode before starting routine.")
                     self.manual_active = False
                     self.ibvs_enable_event.clear()
 
                   self._start_back_and_forth()
-                except Exception as e:
-                  logger.warning(f"Back-and-forth demo trigger failed: {e}")
+              except Exception as e:
+                logger.warning(f"Back-and-forth demo trigger failed (X): {e}")
 
             # Manual target verification: toggle grid game mode (user-driven flight)
             if event.key == pygame.K_b:
@@ -1651,6 +1652,7 @@ class Command:
           "  G           | Take Off (Manual Mode)",
           "  L           | Land / Exit Manual",
           "  B           | Toggle Target Mode (manual grid challenge)",
+          "  X           | Back-and-Forth Motion Test",
           "Swarm Commands:",
           "  S           | SWARM Take Off (All Drones)",
           "  K           | SWARM Land / Exit",
