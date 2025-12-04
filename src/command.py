@@ -375,7 +375,10 @@ class Command:
       return
 
     cx, cy, area, W, H = tgt
-    frame_w, frame_h = float(W), float(H)
+
+    # Use the full detector frame size here (not the marker box dims)
+    fh, fw = frame.shape[:2]
+    frame_w, frame_h = float(fw), float(fh)
     tol = float(self.target_tol_px)
     hit_count = 0
     total = 0
@@ -388,18 +391,24 @@ class Command:
           hit_count += 1
           continue
 
-        # Prefer normalized click coords if available, fall back to stored frame pixels
-        rx = t.get("rx")
-        ry = t.get("ry")
-        if rx is not None and ry is not None:
+        # Prefer detector-frame pixels if available, since cx,cy are in the
+        # same coordinate system. Fall back to normalized clicks only if
+        # fx,fy were never recorded (older logs, etc.).
+        fx = t.get("fx")
+        fy = t.get("fy")
+        if fx is not None and fy is not None:
+          tx = float(fx)
+          ty = float(fy)
+        else:
+          rx = t.get("rx")
+          ry = t.get("ry")
+          if rx is None or ry is None:
+            # Nothing to compare against
+            continue
+
+          # Map normalized click back into detector pixels using full frame size
           tx = float(rx) * max(1.0, frame_w - 1.0)
           ty = float(ry) * max(1.0, frame_h - 1.0)
-        elif t.get("fx") is not None and t.get("fy") is not None:
-          tx = float(t["fx"])
-          ty = float(t["fy"])
-        else:
-          # Nothing to compare against
-          continue
 
         dx = float(cx) - tx
         dy = float(cy) - ty
@@ -1269,7 +1278,14 @@ class Command:
             else:
               rx = ry = None
 
+            det = self._get_detector()
             try:
+              if det:
+                if rx is not None and ry is not None and hasattr(det, "set_click_point_normalized"):
+                  det.set_click_point_normalized(rx, ry)
+                else:
+                  det.set_click_point(fx, fy)
+
               if self._vision_click:
                 self._vision_click(fx, fy)
             except Exception as e:
