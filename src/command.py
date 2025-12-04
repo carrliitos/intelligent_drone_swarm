@@ -780,9 +780,9 @@ class Command:
       logger.info("Back-and-forth routine already running; ignoring trigger.")
       return
 
-    # Do not interfere with existing manual/swarm modes
-    if self.manual_active or self.swarm_active:
-      logger.warning("Back-and-forth ignored: manual/swarm mode already active.")
+    # Do not interfere with active swarm mode (single-drone demo is incompatible with swarm)
+    if self.swarm_active:
+      logger.warning("Back-and-forth ignored: swarm mode already active.")
       return
 
     # Defensive: require an attached Crazyflie and an active detector
@@ -983,6 +983,14 @@ class Command:
 
       logger.info("Back-and-forth: routine complete.")
     finally:
+      # Attempt a gentle land at the end of the routine so the demo is self-contained.
+      try:
+        if self.mc is not None:
+          logger.info("Back-and-forth: landing at end of routine.")
+          self.mc.land()
+          self.mc = None
+      except Exception as e:
+        logger.debug(f"Back-and-forth: landing failed or skipped: {e}")
       self._bf_running.clear()
 
   def _hover(self):
@@ -1342,11 +1350,27 @@ class Command:
               except Exception as e:
                 logger.warning(f"Swarm formation call failed (oscillate): {e}")
 
-            if event.key == pygame.K_5 and self.swarm:
-              try:
-                self.swarm.form_spin()
-              except Exception as e:
-                logger.warning(f"Swarm formation call failed (spin): {e}")
+            if event.key == pygame.K_5:
+              # Swarm case: keep existing spin behavior.
+              if self.swarm:
+                try:
+                  self.swarm.form_spin()
+                except Exception as e:
+                  logger.warning(f"Swarm formation call failed (spin): {e}")
+              else:
+                # Single-drone demo: launch back-and-forth routine.
+                logger.info("Back-and-forth demo: triggering single-drone routine (K=5).")
+                try:
+                  # If we're currently in single-drone manual mode, drop out of manual
+                  # so the background routine has exclusive control of the MotionCommander.
+                  if self.manual_active:
+                    logger.info("Back-and-forth: exiting manual mode before starting routine.")
+                    self.manual_active = False
+                    self.ibvs_enable_event.clear()
+
+                  self._start_back_and_forth()
+                except Exception as e:
+                  logger.warning(f"Back-and-forth demo trigger failed: {e}")
 
             # Manual target verification: toggle grid game mode (user-driven flight)
             if event.key == pygame.K_b:
@@ -1634,7 +1658,7 @@ class Command:
           "  2           | TRIANGLE Formation",
           "  3           | SQUARE Formation",
           "  4           | OSCILLATION Formation",
-          "  5           | SPINNING Formation",
+          "  5           | FORWARD OSCILLATION Formation",
           "Movement (Manual/Swarm):",
           "  Arrow Keys  | Forward, Back, Left, Right",
           "  A / D       | Yaw Left / Right",
