@@ -1356,13 +1356,26 @@ class Command:
               except Exception as e:
                 logger.warning(f"Swarm formation call failed (spin): {e}")
 
-            # X = single-drone back-and-forth demo
+            # X = back-and-forth demo (single-drone or swarm oscillate)
             if event.key == pygame.K_x:
               logger.info("Back-and-forth demo: trigger requested (X).")
               try:
-                if self.swarm_active:
-                  logger.warning("Back-and-forth (X) ignored: swarm mode active.")
+                # If we're in swarm manual mode, run a two-drone oscillation using the same
+                # distance / dwell / cycles config as the single-drone demo.
+                if self.swarm_active and self.swarm:
+                  distance = float(self.bf_target_m)
+                  sets = max(1, int(self.bf_cycles))
+                  pause = float(self.bf_dwell_s)
+                  logger.info(f"Back-and-forth: executing SWARM oscillate demo (distance={distance:.3f}m, sets={sets}, pause={pause:.1f}s)")
+                  try:
+                    self.swarm.form_oscillate(distance_m=distance, sets=sets, pause_s=pause)
+                  except Exception as e_sw:
+                    logger.warning(f"Swarm back-and-forth (oscillate) failed: {e_sw}")
                 else:
+                  # Single-drone back-and-forth verification demo.
+                  if self.swarm_active:
+                    logger.warning("Back-and-forth (X) ignored: swarm mode active but no swarm object.")
+                    return
                   # If currently in manual mode, drop out so the routine has exclusive control.
                   if self.manual_active:
                     logger.info("Back-and-forth: exiting manual mode before starting routine.")
