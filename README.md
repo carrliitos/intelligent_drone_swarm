@@ -4,6 +4,7 @@
 
 ## Team
 
+- Dr. Zachary Oster (osterz@uww.edu)
 - Benzon Carlitos Salazar (salazarbc24@uww.edu)
 - Kevin King (kingk20@uww.edu)
 - Anjali Gupta (guptaam23@uww.edu)
