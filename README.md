@@ -1,5 +1,9 @@
 # NEST - Networked Ensemble of Swarm Things
 
+> **Status: Archived (Capstone Freeze)**  
+> This repo is **frozen** to preserve the exact implementation referenced in my NEST capstone technical report.  
+> No further development will occur here. Continued development (Phase 1.5+) is in: `https://github.com/carrliitos/nest`.
+
 *A Vision-Based Verification of Crazyflie Formations*
 
 ## Team
